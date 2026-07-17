@@ -281,7 +281,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
 
-    // 4. Pastas de Controle de Ponto (Novo visual com botão Ver Relatório)
+    // 4. Pastas de Controle de Ponto Mensal e PDF/Excel
     const inputMesAno = document.getElementById('ponto-mes-ano');
     const hojeData = new Date();
     inputMesAno.value = `${hojeData.getFullYear()}-${String(hojeData.getMonth() + 1).padStart(2, '0')}`;
@@ -297,7 +297,6 @@ document.addEventListener('DOMContentLoaded', () => {
             funcionarios.forEach(func => {
                 const foto = func.foto_url || 'https://via.placeholder.com/150';
                 
-                // ADICIONADO: Botão azul "Ver Relatório" inserido antes do botão de baixar
                 divPastas.innerHTML += `
                     <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm flex flex-col items-center text-center gap-3 transition hover:shadow-md hover:border-orange-300">
                         <img src="${foto}" class="w-16 h-16 rounded-full object-cover shadow-sm">
@@ -318,59 +317,110 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) { console.error(err); }
     }
 
-    // --- NOVO: Função para exibir o relatório diretamente na tela ---
+    // Função auxiliar para formatar horas (Ex: "1h 30m" ou "45m")
+    function formatarTempo(totalMinutos) {
+        if (totalMinutos === 0) return '0m';
+        const d = Math.floor(totalMinutos / 1440);
+        const h = Math.floor((totalMinutos % 1440) / 60);
+        const m = totalMinutos % 60;
+        let str = '';
+        if (d > 0) str += `${d} dias, `;
+        if (h > 0) str += `${h}h `;
+        str += `${m}m`;
+        return str;
+    }
+
+    // --- RELATÓRIO NA TELA (COM ATRASO E HORA EXTRA) ---
     window.abrirRelatorioTela = async function(idFuncionario, nomeFuncionario) {
         const mesAno = document.getElementById('ponto-mes-ano').value;
         if (!mesAno) return alert('Selecione um mês primeiro!');
 
         const [ano, mes] = mesAno.split('-');
-        const primeiroDia = new Date(ano, mes - 1, 1).toLocaleDateString('en-CA');
-        const ultimoDia = new Date(ano, mes, 0).toLocaleDateString('en-CA');
+        const primeiroDiaStr = `${ano}-${mes}-01`;
+        const ultimoDiaNumero = new Date(ano, mes, 0).getDate();
+        const ultimoDiaStr = `${ano}-${mes}-${String(ultimoDiaNumero).padStart(2, '0')}`;
 
-        // Prepara o Modal
         document.getElementById('relatorio-tela-nome').textContent = nomeFuncionario;
         document.getElementById('relatorio-tela-mes').textContent = `Período: ${mesAno}`;
         const tbody = document.getElementById('tabela-relatorio-tela');
-        tbody.innerHTML = '<tr><td colspan="4" class="p-8 text-center text-slate-500">Buscando registros do servidor...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-slate-500">Buscando registros do servidor...</td></tr>';
         
         document.getElementById('modal-ver-relatorio').classList.replace('hidden', 'flex');
 
         try {
+            // Busca o horário oficial do funcionário
+            const { data: funcDados } = await window.bancoDeDados.from('funcionarios').select('horario_entrada, horario_saida').eq('id', idFuncionario).single();
+            const horarioOficialEntrada = funcDados && funcDados.horario_entrada ? funcDados.horario_entrada : '08:00';
+            const horarioOficialSaida = funcDados && funcDados.horario_saida ? funcDados.horario_saida : '17:00';
+
             const { data: registros } = await window.bancoDeDados.from('registros_ponto')
                 .select('*')
                 .eq('funcionario_id', idFuncionario)
-                .gte('data_registro', primeiroDia)
-                .lte('data_registro', ultimoDia);
+                .gte('data_registro', primeiroDiaStr)
+                .lte('data_registro', ultimoDiaStr);
 
             tbody.innerHTML = '';
             
-            const diasNoMes = new Date(ano, mes, 0).getDate();
             const hojeLocal = new Date().getDate();
             const mesAtualLocal = new Date().getMonth() + 1;
             const anoAtualLocal = new Date().getFullYear();
 
-            for (let d = 1; d <= diasNoMes; d++) {
-                // Esconde os dias do futuro se estivermos vendo o mês atual
-                if (parseInt(ano) === anoAtualLocal && parseInt(mes) === mesAtualLocal && d > hojeLocal) {
-                    continue; 
-                }
+            let totalAtrasosMinutos = 0;
+            let qtdDiasAtraso = 0;
+            let totalExtrasMinutos = 0;
+            let qtdDiasExtra = 0;
 
-                const dataISO = new Date(ano, mes - 1, d).toLocaleDateString('en-CA');
-                const dataBR = new Date(ano, mes - 1, d).toLocaleDateString('pt-BR');
+            for (let d = 1; d <= ultimoDiaNumero; d++) {
+                if (parseInt(ano) === anoAtualLocal && parseInt(mes) === mesAtualLocal && d > hojeLocal) continue; 
+
+                const dataISO = `${ano}-${mes}-${String(d).padStart(2, '0')}`;
+                const dataBR = `${String(d).padStart(2, '0')}/${mes}/${ano}`;
                 const registroDia = (registros || []).find(r => r.data_registro === dataISO);
 
                 let inTime = '--:--';
                 let outTime = '--:--';
-                let statusHtml = '<span class="bg-red-100 text-red-700 font-bold px-2 py-1 rounded text-xs">❌ FALTA / INCOMPLETO</span>';
+                let statusHtml = '<span class="bg-red-100 text-red-700 font-bold px-2 py-1 rounded text-xs">❌ FALTA</span>';
+                let atrasoFormatado = '--';
+                let extraFormatado = '--';
 
                 if (registroDia) {
-                    if (registroDia.clock_in) inTime = new Date(registroDia.clock_in).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-                    if (registroDia.clock_out) outTime = new Date(registroDia.clock_out).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                    // Verificação de Entrada (Atraso)
+                    if (registroDia.clock_in) {
+                        const dataIn = new Date(registroDia.clock_in);
+                        inTime = dataIn.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                        
+                        const minRegistradosIn = (dataIn.getHours() * 60) + dataIn.getMinutes();
+                        const [hEspIn, mEspIn] = horarioOficialEntrada.split(':').map(Number);
+                        const minEsperadosIn = (hEspIn * 60) + mEspIn;
+
+                        if (minRegistradosIn > minEsperadosIn) {
+                            const minutosAtraso = minRegistradosIn - minEsperadosIn;
+                            totalAtrasosMinutos += minutosAtraso;
+                            qtdDiasAtraso++;
+                            atrasoFormatado = `${minutosAtraso} min`;
+                        }
+                    }
+
+                    // Verificação de Saída (Hora Extra)
+                    if (registroDia.clock_out) {
+                        const dataOut = new Date(registroDia.clock_out);
+                        outTime = dataOut.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+                        const minRegistradosOut = (dataOut.getHours() * 60) + dataOut.getMinutes();
+                        const [hEspOut, mEspOut] = horarioOficialSaida.split(':').map(Number);
+                        const minEsperadosOut = (hEspOut * 60) + mEspOut;
+
+                        if (minRegistradosOut > minEsperadosOut) {
+                            const minutosExtra = minRegistradosOut - minEsperadosOut;
+                            totalExtrasMinutos += minutosExtra;
+                            qtdDiasExtra++;
+                            extraFormatado = `${minutosExtra} min`;
+                        }
+                    }
                     
                     if (registroDia.clock_in && registroDia.clock_out) {
                         statusHtml = '<span class="bg-emerald-100 text-emerald-700 font-bold px-2 py-1 rounded text-xs">✅ COMPLETO</span>';
                     } else if (registroDia.clock_in && !registroDia.clock_out) {
-                        // Se bateu entrada hoje mas ainda não saiu, mostra status azul "Trabalhando"
                         if (parseInt(ano) === anoAtualLocal && parseInt(mes) === mesAtualLocal && d === hojeLocal) {
                             statusHtml = '<span class="bg-blue-100 text-blue-700 font-bold px-2 py-1 rounded text-xs">🔄 TRABALHANDO</span>';
                         }
@@ -382,74 +432,141 @@ document.addEventListener('DOMContentLoaded', () => {
                         <td class="p-4 font-bold text-slate-700">${dataBR}</td>
                         <td class="p-4 font-mono text-center text-emerald-600 font-bold">${inTime}</td>
                         <td class="p-4 font-mono text-center text-orange-600 font-bold">${outTime}</td>
+                        <td class="p-4 font-mono text-center text-red-600 font-bold">${atrasoFormatado}</td>
+                        <td class="p-4 font-mono text-center text-blue-600 font-bold">${extraFormatado}</td>
                         <td class="p-4 text-center">${statusHtml}</td>
                     </tr>
                 `;
             }
+
+            // Resumo de Atrasos e Horas Extras
+            const resumoBox = document.getElementById('relatorio-resumo-box');
             
+            if (qtdDiasAtraso > 0 || qtdDiasExtra > 0) {
+                resumoBox.classList.remove('hidden');
+                resumoBox.classList.add('flex');
+                
+                document.getElementById('relatorio-texto-atraso').innerHTML = `${qtdDiasAtraso} ocorrências no mês<br><span class="text-xs text-red-700 block mt-1">Total acumulado: ${formatarTempo(totalAtrasosMinutos)}</span>`;
+                
+                document.getElementById('relatorio-texto-extra').innerHTML = `${qtdDiasExtra} ocorrências no mês<br><span class="text-xs text-blue-700 block mt-1">Total acumulado: ${formatarTempo(totalExtrasMinutos)}</span>`;
+            } else {
+                resumoBox.classList.remove('flex');
+                resumoBox.classList.add('hidden');
+            }
+
             if (tbody.innerHTML === '') {
-                tbody.innerHTML = '<tr><td colspan="4" class="p-8 text-center text-slate-500">Nenhum dia para exibir.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-slate-500">Nenhum dia para exibir.</td></tr>';
             }
 
         } catch (err) {
-            tbody.innerHTML = '<tr><td colspan="4" class="p-8 text-center text-red-500">Erro ao carregar dados.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-red-500">Erro ao carregar dados.</td></tr>';
         }
     };
 
+    // --- BAIXAR EXCEL COM DATA CORRIGIDA E HORA EXTRA ---
     window.baixarRelatorioExcel = async function(idFuncionario, nomeFuncionario) {
         const mesAno = document.getElementById('ponto-mes-ano').value;
         if (!mesAno) return alert('Selecione um mês primeiro!');
         
         const [ano, mes] = mesAno.split('-');
-        const primeiroDia = new Date(ano, mes - 1, 1).toLocaleDateString('en-CA');
-        const ultimoDia = new Date(ano, mes, 0).toLocaleDateString('en-CA');
+        const primeiroDiaStr = `${ano}-${mes}-01`;
+        const ultimoDiaNumero = new Date(ano, mes, 0).getDate();
+        const ultimoDiaStr = `${ano}-${mes}-${String(ultimoDiaNumero).padStart(2, '0')}`;
 
         try {
+            const { data: funcDados } = await window.bancoDeDados.from('funcionarios').select('horario_entrada, horario_saida').eq('id', idFuncionario).single();
+            const horarioOficialEntrada = funcDados && funcDados.horario_entrada ? funcDados.horario_entrada : '08:00';
+            const horarioOficialSaida = funcDados && funcDados.horario_saida ? funcDados.horario_saida : '17:00';
+
             const { data: registros } = await window.bancoDeDados.from('registros_ponto')
                 .select('*')
                 .eq('funcionario_id', idFuncionario)
-                .gte('data_registro', primeiroDia)
-                .lte('data_registro', ultimoDia);
+                .gte('data_registro', primeiroDiaStr)
+                .lte('data_registro', ultimoDiaStr);
 
-            let csv = '\uFEFF';
+            let csv = '\uFEFF'; 
             csv += `RELATÓRIO DE PONTO;${nomeFuncionario}\n`;
             csv += `Mês de Referência;${mesAno}\n\n`;
-            csv += `Data;Entrada (Clock In);Saída (Clock Out);Status de Completude\n`;
+            // Colunas
+            csv += `Data;Entrada (Clock In);Saída (Clock Out);Atraso (Minutos);Hora Extra (Minutos);Status de Completude\n`;
 
-            const diasNoMes = new Date(ano, mes, 0).getDate();
             const hojeLocal = new Date().getDate();
             const mesAtualLocal = new Date().getMonth() + 1;
+            const anoAtualLocal = new Date().getFullYear();
 
-            for (let d = 1; d <= diasNoMes; d++) {
-                if (parseInt(ano) === new Date().getFullYear() && parseInt(mes) === mesAtualLocal && d > hojeLocal) {
-                    continue;
-                }
+            let totalAtrasosMinutos = 0;
+            let qtdDiasAtraso = 0;
+            let totalExtrasMinutos = 0;
+            let qtdDiasExtra = 0;
 
-                const dataISO = new Date(ano, mes - 1, d).toLocaleDateString('en-CA');
-                const dataBR = new Date(ano, mes - 1, d).toLocaleDateString('pt-BR');
+            for (let d = 1; d <= ultimoDiaNumero; d++) {
+                if (parseInt(ano) === anoAtualLocal && parseInt(mes) === mesAtualLocal && d > hojeLocal) continue;
+
+                const dataISO = `${ano}-${mes}-${String(d).padStart(2, '0')}`;
+                
+                // Formatação manual da data como texto para forçar o Excel a não bugar
+                const dataBR = `${String(d).padStart(2, '0')}/${mes}/${ano}`;
+                
                 const registroDia = (registros || []).find(r => r.data_registro === dataISO);
 
                 let inTime = '--:--';
                 let outTime = '--:--';
-                let status = '❌ INCOMPLETO / FALTA';
+                let status = 'INCOMPLETO / FALTA';
+                let atrasoPlanilha = '0';
+                let extraPlanilha = '0';
 
                 if (registroDia) {
-                    if (registroDia.clock_in) inTime = new Date(registroDia.clock_in).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-                    if (registroDia.clock_out) outTime = new Date(registroDia.clock_out).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                    if (registroDia.clock_in) {
+                        const dataIn = new Date(registroDia.clock_in);
+                        inTime = dataIn.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+                        const minRegistradosIn = (dataIn.getHours() * 60) + dataIn.getMinutes();
+                        const [hEspIn, mEspIn] = horarioOficialEntrada.split(':').map(Number);
+                        const minEsperadosIn = (hEspIn * 60) + mEspIn;
+
+                        if (minRegistradosIn > minEsperadosIn) {
+                            const minutosAtraso = minRegistradosIn - minEsperadosIn;
+                            totalAtrasosMinutos += minutosAtraso;
+                            qtdDiasAtraso++;
+                            atrasoPlanilha = `${minutosAtraso}`;
+                        }
+                    }
+
+                    if (registroDia.clock_out) {
+                        const dataOut = new Date(registroDia.clock_out);
+                        outTime = dataOut.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+                        const minRegistradosOut = (dataOut.getHours() * 60) + dataOut.getMinutes();
+                        const [hEspOut, mEspOut] = horarioOficialSaida.split(':').map(Number);
+                        const minEsperadosOut = (hEspOut * 60) + mEspOut;
+
+                        if (minRegistradosOut > minEsperadosOut) {
+                            const minutosExtra = minRegistradosOut - minEsperadosOut;
+                            totalExtrasMinutos += minutosExtra;
+                            qtdDiasExtra++;
+                            extraPlanilha = `${minutosExtra}`;
+                        }
+                    }
                     
                     if (registroDia.clock_in && registroDia.clock_out) {
-                        status = '✅ COMPLETO';
+                        status = 'COMPLETO';
                     }
                 }
 
-                csv += `${dataBR};${inTime};${outTime};${status}\n`;
+                // O comando ="Texto" obriga o Excel a mostrar a data perfeitamente sem formatar errado
+                csv += `="${dataBR}";${inTime};${outTime};${atrasoPlanilha};${extraPlanilha};${status}\n`;
             }
+
+            // CRIAÇÃO DO BLOCO DE RESUMO NO EXCEL
+            csv += `\n\nRESUMO DO MÊS\n`;
+            csv += `Dias com Atraso:;${qtdDiasAtraso};Total de Minutos de Atraso:;${totalAtrasosMinutos} min;Tempo Acumulado:;${formatarTempo(totalAtrasosMinutos)}\n`;
+            csv += `Dias com Hora Extra:;${qtdDiasExtra};Total de Minutos de H. Extra:;${totalExtrasMinutos} min;Tempo Acumulado:;${formatarTempo(totalExtrasMinutos)}\n`;
 
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
             const url = URL.createObjectURL(blob);
             link.setAttribute("href", url);
-            link.setAttribute("download", `Relatorio_${nomeFuncionario.replace(' ','_')}_${mesAno}.csv`);
+            link.setAttribute("download", `Relatorio_Ponto_${nomeFuncionario.replace(' ','_')}_${mesAno}.csv`);
             link.style.visibility = 'hidden';
             document.body.appendChild(link);
             link.click();
