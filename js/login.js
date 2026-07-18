@@ -38,7 +38,6 @@ document.addEventListener('DOMContentLoaded', () => {
         grid.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10 font-bold">Carregando equipe...</p>';
 
         try {
-            // ADICIONADO: 'cargo' no .select() para puxar a profissão do banco de dados
             const { data: funcionarios, error } = await window.bancoDeDados
                 .from('funcionarios')
                 .select('id, nome_completo, foto_url, cargo')
@@ -54,26 +53,21 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             grid.innerHTML = ''; 
-
             funcionarios.forEach(func => {
                 const foto = func.foto_url || 'https://via.placeholder.com/150';
-                const cargoFormatado = func.cargo || 'Funcionário'; // Se não tiver cargo, coloca "Funcionário" por padrão
-
+                const cargoFormatado = func.cargo || 'Funcionário';
                 const card = document.createElement('div');
-                card.className = 'bg-white p-6 rounded-xl shadow-sm hover:shadow-xl transition transform hover:-translate-y-2 border-b-4 border-transparent hover:border-orange-500 cursor-pointer text-center flex flex-col items-center justify-center';
+                card.className = 'bg-white p-4 sm:p-6 rounded-xl shadow-sm hover:shadow-xl transition transform hover:-translate-y-2 border-b-4 border-transparent hover:border-orange-500 cursor-pointer text-center flex flex-col items-center justify-center';
                 
-                // ADICIONADO: A tag <p> com o cargo logo abaixo do <h3> do nome
                 card.innerHTML = `
-                    <img src="${foto}" class="w-24 h-24 mx-auto rounded-full object-cover border-4 border-slate-100 mb-3 shadow-sm">
-                    <h3 class="font-bold text-slate-800 text-lg truncate w-full leading-tight">${func.nome_completo.split(' ')[0]}</h3>
-                    <p class="text-xs text-slate-500 font-medium truncate w-full mt-1">${cargoFormatado}</p>
+                    <img src="${foto}" class="w-16 h-16 sm:w-24 sm:h-24 mx-auto rounded-full object-cover border-4 border-slate-100 mb-2 sm:mb-3 shadow-sm">
+                    <h3 class="font-bold text-slate-800 text-base sm:text-lg truncate w-full leading-tight">${func.nome_completo.split(' ')[0]}</h3>
+                    <p class="text-[10px] sm:text-xs text-slate-500 font-medium truncate w-full mt-1">${cargoFormatado}</p>
                 `;
-                
                 card.addEventListener('click', () => abrirModalPin(func));
                 grid.appendChild(card);
             });
         } catch (error) {
-            console.error(error);
             grid.innerHTML = '<p class="text-red-500 col-span-full text-center py-10 font-bold">Erro ao carregar equipe. Verifique a conexão.</p>';
         }
     }
@@ -82,10 +76,7 @@ document.addEventListener('DOMContentLoaded', () => {
         funcionarioSelecionado = funcionario;
         document.getElementById('pin-foto').src = funcionario.foto_url || 'https://via.placeholder.com/150';
         document.getElementById('pin-nome').textContent = funcionario.nome_completo;
-        
-        // ADICIONADO: Injeta o cargo no Modal do PIN também
         document.getElementById('pin-cargo').textContent = funcionario.cargo || 'Funcionário';
-        
         document.getElementById('input-pin').value = '';
         document.getElementById('erro-pin').classList.add('hidden');
         
@@ -117,7 +108,7 @@ document.addEventListener('DOMContentLoaded', () => {
             salvarSessao(data);
             window.location.href = 'funcionario.html';
         } catch (error) {
-            erroMsg.textContent = 'Erro de conexão com o servidor.';
+            erroMsg.textContent = 'Erro de conexão.';
             erroMsg.classList.remove('hidden');
         }
     });
@@ -131,52 +122,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             const { data, error } = await window.bancoDeDados.from('funcionarios').select('*').eq('matricula', matricula);
-            
-            if (error) {
-                erroMsg.textContent = 'Erro no banco: ' + error.message;
-                erroMsg.classList.remove('hidden');
-                return;
-            }
-
-            if (!data || data.length === 0) {
+            if (error || !data || data.length === 0) {
                 erroMsg.textContent = '❌ Credenciais inválidas!';
                 erroMsg.classList.remove('hidden');
                 return;
             }
-
             const usuario = data[0]; 
             if (usuario.role !== 'admin') {
-                erroMsg.textContent = '⛔ Acesso negado. Apenas administradores.';
+                erroMsg.textContent = '⛔ Acesso negado.';
                 erroMsg.classList.remove('hidden');
                 return;
             }
-
             if (usuario.pin_hash !== pin) {
                 erroMsg.textContent = '🔑 Senha incorreta!';
                 erroMsg.classList.remove('hidden');
                 return;
             }
-
-            erroMsg.textContent = '✅ SUCESSO! Entrando no painel...';
+            erroMsg.textContent = '✅ SUCESSO! Entrando...';
             erroMsg.classList.remove('hidden', 'text-red-600', 'bg-red-50');
             erroMsg.classList.add('text-green-700', 'bg-green-50', 'p-2', 'rounded', 'font-bold');
-
             salvarSessao(usuario);
             setTimeout(() => { window.location.href = 'admin.html'; }, 1000);
-
-        } catch (error) {
-            erroMsg.textContent = 'Erro no código: ' + error.message;
-            erroMsg.classList.remove('hidden');
-        }
+        } catch (error) { erroMsg.textContent = 'Erro no código.'; erroMsg.classList.remove('hidden'); }
     });
 
     function salvarSessao(usuario) {
         sessionStorage.setItem('usuarioLogado', JSON.stringify({
-            id: usuario.id,
-            nome: usuario.nome_completo,
-            cargo: usuario.cargo,
-            foto: usuario.foto_url,
-            role: usuario.role
+            id: usuario.id, nome: usuario.nome_completo, cargo: usuario.cargo, foto: usuario.foto_url, role: usuario.role
         }));
     }
 });

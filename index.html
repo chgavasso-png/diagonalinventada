@@ -18,16 +18,16 @@
 
     <!-- TELA 1: INÍCIO (Quiosque) -->
     <div id="view-home" class="w-full max-w-4xl text-center fade-in">
-        <img src="logo.png" alt="Logo da Empresa" class="h-40 mx-auto mb-6 object-contain" onerror="this.src='https://via.placeholder.com/250x100?text=Sua+Logo+Aqui'">
+        <img src="logo.png" alt="Logo da Empresa" class="h-32 sm:h-40 mx-auto mb-6 object-contain" onerror="this.src='https://via.placeholder.com/250x100?text=Sua+Logo+Aqui'">
         
-        <h1 class="text-2xl font-bold text-slate-800 mb-12 tracking-widest uppercase">Controle de Frequência</h1>
+        <h1 class="text-xl sm:text-2xl font-bold text-slate-800 mb-8 sm:mb-12 tracking-widest uppercase">Controle de Frequência</h1>
         
-        <button id="btn-giant-clockin" class="bg-orange-500 hover:bg-orange-600 text-white font-extrabold text-5xl py-16 px-32 rounded-xl shadow-[0_10px_20px_rgba(249,115,22,0.3)] transition-all transform hover:-translate-y-1 active:translate-y-1 active:shadow-sm mb-16 border-b-8 border-orange-700">
+        <button id="btn-giant-clockin" class="w-full sm:w-auto bg-orange-500 hover:bg-orange-600 text-white font-extrabold text-3xl sm:text-5xl py-8 px-8 sm:py-16 sm:px-32 rounded-xl shadow-[0_10px_20px_rgba(249,115,22,0.3)] transition-all transform hover:-translate-y-1 active:translate-y-1 active:shadow-sm mb-12 sm:mb-16 border-b-8 border-orange-700">
             CLOCK IN
         </button>
 
         <div>
-            <button id="btn-show-admin" class="text-slate-600 hover:text-slate-900 font-bold uppercase tracking-wide text-sm transition flex items-center justify-center mx-auto gap-2">
+            <button id="btn-show-admin" class="text-slate-600 hover:text-slate-900 font-bold uppercase tracking-wide text-xs sm:text-sm transition flex items-center justify-center mx-auto gap-2">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
                 Acesso Restrito (Admin)
             </button>
@@ -36,43 +36,43 @@
 
     <!-- TELA 2: LISTA DE FUNCIONÁRIOS -->
     <div id="view-employees" class="w-full max-w-5xl hidden fade-in">
-        <div class="flex justify-between items-center mb-8 bg-slate-900 p-6 rounded-xl shadow-md text-white">
-            <h2 class="text-2xl font-bold uppercase tracking-wide">Selecione seu Perfil</h2>
-            <button id="btn-back-home" class="text-slate-900 bg-white hover:bg-gray-200 px-6 py-2 rounded-lg font-bold transition">Voltar</button>
+        <div class="flex justify-between items-center mb-6 sm:mb-8 bg-slate-900 p-4 sm:p-6 rounded-xl shadow-md text-white">
+            <h2 class="text-lg sm:text-2xl font-bold uppercase tracking-wide">Selecione seu Perfil</h2>
+            <button id="btn-back-home" class="text-slate-900 bg-white hover:bg-gray-200 px-4 py-2 text-sm sm:text-base sm:px-6 rounded-lg font-bold transition">Voltar</button>
         </div>
         
-        <div id="employee-grid" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
+        <div id="employee-grid" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 sm:gap-6">
             <p class="text-gray-500 col-span-full text-center py-10 font-medium">Carregando equipe...</p>
         </div>
     </div>
 
     <!-- TELA 3: MODAL DE PIN (Funcionário) -->
     <div id="modal-pin" class="fixed inset-0 bg-slate-900 bg-opacity-80 hidden items-center justify-center fade-in z-50 p-4">
-        <div class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-sm text-center relative border-t-8 border-orange-500">
-            <button id="btn-close-pin" class="absolute top-4 right-4 text-gray-400 hover:text-gray-800 font-bold text-2xl transition">&times;</button>
+        <div class="bg-white p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-sm text-center relative border-t-8 border-orange-500">
+            <button id="btn-close-pin" class="absolute top-2 right-4 text-gray-400 hover:text-gray-800 font-bold text-3xl transition">&times;</button>
             
-            <img id="pin-foto" src="" class="w-28 h-28 rounded-full mx-auto border-4 border-slate-100 object-cover mb-4 shadow-sm">
-            <h3 id="pin-nome" class="text-xl font-bold text-slate-800 mb-1">Nome</h3>
-            <p id="pin-cargo" class="text-sm font-medium text-slate-500 mb-6 uppercase tracking-wider">Cargo</p>
+            <img id="pin-foto" src="" class="w-24 h-24 sm:w-28 sm:h-28 rounded-full mx-auto border-4 border-slate-100 object-cover mb-4 shadow-sm">
+            <h3 id="pin-nome" class="text-lg sm:text-xl font-bold text-slate-800 mb-1">Nome</h3>
+            <p id="pin-cargo" class="text-xs sm:text-sm font-medium text-slate-500 mb-6 uppercase tracking-wider">Cargo</p>
             
-            <form id="form-pin" class="space-y-5">
+            <form id="form-pin" class="space-y-4 sm:space-y-5">
                 <div>
-                    <input type="password" id="input-pin" placeholder="PIN de 6 dígitos" maxlength="6" pattern="\d{6}" class="w-full px-4 py-4 text-center text-2xl tracking-[0.5em] border-2 border-slate-200 rounded-lg focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200 transition" required>
+                    <input type="password" id="input-pin" placeholder="PIN" maxlength="6" pattern="\d{6}" class="w-full px-4 py-3 sm:py-4 text-center text-xl sm:text-2xl tracking-[0.3em] sm:tracking-[0.5em] border-2 border-slate-200 rounded-lg focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200 transition" required>
                 </div>
                 <div id="erro-pin" class="text-red-600 text-sm hidden font-bold bg-red-50 p-2 rounded">PIN incorreto!</div>
-                <button type="submit" class="w-full bg-orange-500 text-white font-bold py-4 rounded-lg hover:bg-orange-600 shadow-md transition uppercase tracking-wide">Confirmar Acesso</button>
+                <button type="submit" class="w-full bg-orange-500 text-white font-bold py-3 sm:py-4 rounded-lg hover:bg-orange-600 shadow-md transition uppercase tracking-wide">Confirmar Acesso</button>
             </form>
         </div>
     </div>
 
     <!-- TELA 4: LOGIN DO ADMIN -->
-    <div id="view-admin" class="w-full max-w-sm hidden fade-in bg-white p-8 rounded-xl shadow-2xl border-t-8 border-slate-900">
+    <div id="view-admin" class="w-full max-w-sm hidden fade-in bg-white p-6 sm:p-8 rounded-xl shadow-2xl border-t-8 border-slate-900">
         <div class="flex justify-between items-center mb-6">
-            <h2 class="text-xl font-bold text-slate-800 uppercase tracking-wide">Painel Admin</h2>
+            <h2 class="text-lg sm:text-xl font-bold text-slate-800 uppercase tracking-wide">Painel Admin</h2>
             <button id="btn-back-home-admin" class="text-gray-400 hover:text-gray-800 font-bold text-2xl">&times;</button>
         </div>
         
-        <form id="form-admin" class="space-y-5">
+        <form id="form-admin" class="space-y-4 sm:space-y-5">
             <div>
                 <label class="block text-sm font-bold text-slate-700 mb-1">Matrícula Admin</label>
                 <input type="text" id="admin-matricula" class="w-full px-4 py-3 border-2 border-slate-200 rounded-lg focus:outline-none focus:border-slate-900 transition" required>
@@ -82,7 +82,7 @@
                 <input type="password" id="admin-pin" class="w-full px-4 py-3 border-2 border-slate-200 rounded-lg focus:outline-none focus:border-slate-900 transition" required>
             </div>
             <div id="erro-admin" class="text-red-600 text-sm hidden font-bold bg-red-50 p-2 rounded text-center break-words"></div>
-            <button type="submit" class="w-full bg-slate-900 text-white font-bold py-4 rounded-lg hover:bg-slate-800 shadow-md transition uppercase tracking-wide">Entrar no Painel</button>
+            <button type="submit" class="w-full bg-slate-900 text-white font-bold py-3 sm:py-4 rounded-lg hover:bg-slate-800 shadow-md transition uppercase tracking-wide">Entrar no Painel</button>
         </form>
     </div>
 
