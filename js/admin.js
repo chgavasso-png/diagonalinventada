@@ -162,6 +162,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('func-role').value = func.role;
         document.getElementById('func-entrada').value = func.horario_entrada || '08:00';
         document.getElementById('func-saida').value = func.horario_saida || '17:00';
+        document.getElementById('func-almoco-inicio').value = func.horario_almoco_inicio || '13:00';
+        document.getElementById('func-almoco-fim').value = func.horario_almoco_fim || '14:00';
         fotoBase64Temporaria = func.foto_url || null;
         document.getElementById('func-foto-preview').src = fotoBase64Temporaria || 'https://via.placeholder.com/150';
         document.getElementById('modal-titulo').textContent = 'Editar Funcionário';
@@ -179,17 +181,24 @@ document.addEventListener('DOMContentLoaded', () => {
             whatsapp: document.getElementById('func-whatsapp').value.trim(), // Salva WhatsApp
             role: document.getElementById('func-role').value,
             horario_entrada: document.getElementById('func-entrada').value, 
-            horario_saida: document.getElementById('func-saida').value, 
+            horario_saida: document.getElementById('func-saida').value,
+            horario_almoco_inicio: document.getElementById('func-almoco-inicio').value || '13:00',
+            horario_almoco_fim: document.getElementById('func-almoco-fim').value || '14:00',
             status: true
         };
         if (fotoBase64Temporaria) dados.foto_url = fotoBase64Temporaria; 
         try {
-            if (id) await window.bancoDeDados.from('funcionarios').update(dados).eq('id', id);
-            else await window.bancoDeDados.from('funcionarios').insert([dados]);
+            if (id) {
+                const { error } = await window.bancoDeDados.from('funcionarios').update(dados).eq('id', id);
+                if (error) throw error;
+            } else {
+                const { error } = await window.bancoDeDados.from('funcionarios').insert([dados]);
+                if (error) throw error;
+            }
             alert('Salvo com sucesso!');
             document.getElementById('modal-funcionario').classList.replace('flex', 'hidden');
             carregarTabelaFuncionarios(); carregarDashboard();
-        } catch (err) { alert('Erro ao salvar. Verifique conexão.'); }
+        } catch (err) { alert('Erro ao salvar: ' + (err.message || 'Verifique conexão.')); }
     });
 
     window.excluirFuncionario = async function(id) {
@@ -297,18 +306,22 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('modal-ver-relatorio').classList.replace('hidden', 'flex');
 
         try {
-            const { data: funcDados } = await window.bancoDeDados.from('funcionarios').select('horario_entrada, horario_saida').eq('id', idFuncionario).single();
+            const { data: funcDados } = await window.bancoDeDados.from('funcionarios').select('horario_entrada, horario_saida, horario_almoco_inicio, horario_almoco_fim').eq('id', idFuncionario).single();
             const { data: registros } = await window.bancoDeDados.from('registros_ponto').select('*').eq('funcionario_id', idFuncionario).gte('data_registro', primeiroDiaStr).lte('data_registro', ultimoDiaStr);
 
+            function minFromHHMM(v, dflt) { const t = v || dflt; const [h, m] = t.split(':').map(Number); return h * 60 + m; }
+            const minAlmoco = Math.max(0, minFromHHMM(funcDados.horario_almoco_fim, '14:00') - minFromHHMM(funcDados.horario_almoco_inicio, '13:00'));
+
+            document.getElementById('relatorio-tela-mes').textContent = `Período: ${mesAno} | Horário: ${funcDados.horario_entrada || '08:00'}-${funcDados.horario_saida || '17:00'} | Almoço: ${funcDados.horario_almoco_inicio || '13:00'}-${funcDados.horario_almoco_fim || '14:00'}`;
             tbody.innerHTML = '';
-            let totalAtraso = 0, totalExtra = 0;
+            let totalAtraso = 0, totalExtra = 0, totalTrabalhado = 0;
 
             for (let d = 1; d <= ultimoDiaNumero; d++) {
                 const dataISO = `${ano}-${mes}-${String(d).padStart(2, '0')}`;
                 const dataBR = `${String(d).padStart(2, '0')}/${mes}`;
                 const reg = (registros || []).find(r => r.data_registro === dataISO);
                 
-                let inTime = '--:--', outTime = '--:--', atraso = 0, extra = 0;
+                let inTime = '--:--', outTime = '--:--', atraso = 0, extra = 0, trabalhado = 0;
                 let status = '<span class="bg-slate-100 text-slate-500 px-2 py-1 rounded text-[10px] sm:text-xs">Vazio</span>';
 
                 if (reg) {
@@ -325,10 +338,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         const mS = funcDados.horario_saida ? parseInt(funcDados.horario_saida.split(':')[1]) : 0;
                         const diff = (new Date(reg.clock_out).getHours() * 60 + new Date(reg.clock_out).getMinutes()) - (hS * 60 + mS);
                         if (diff > 5) extra = diff;
+                        if (reg.clock_in) {
+                            const totalMin = (new Date(reg.clock_out) - new Date(reg.clock_in)) / 60000;
+                            trabalhado = Math.max(0, totalMin - minAlmoco);
+                        }
                     }
                     status = reg.clock_in && reg.clock_out ? '<span class="text-emerald-600 font-bold">✅</span>' : '🔄';
                 }
-                totalAtraso += atraso; totalExtra += extra;
+                totalAtraso += atraso; totalExtra += extra; totalTrabalhado += trabalhado;
                 
                 // Só exibe linhas que têm algum registro para não poluir
                 if (reg) {
@@ -357,21 +374,27 @@ document.addEventListener('DOMContentLoaded', () => {
         const ultimoDiaStr = `${ano}-${mes}-${String(ultimoDiaNumero).padStart(2, '0')}`;
 
         try {
-            const { data: funcDados } = await window.bancoDeDados.from('funcionarios').select('horario_entrada, horario_saida').eq('id', idFuncionario).single();
+            const { data: funcDados } = await window.bancoDeDados.from('funcionarios').select('horario_entrada, horario_saida, horario_almoco_inicio, horario_almoco_fim').eq('id', idFuncionario).single();
             const { data: registros } = await window.bancoDeDados.from('registros_ponto').select('*').eq('funcionario_id', idFuncionario).gte('data_registro', primeiroDiaStr).lte('data_registro', ultimoDiaStr);
 
-            let csv = '\uFEFF'; 
-            csv += `RELATÓRIO DE PONTO;${nomeFuncionario}\nMês Referência;${mesAno}\n\n`;
-            csv += `Data;Entrada;Saída;Atraso (Minutos);Hora Extra (Minutos);Status\n`;
+            // Duração do intervalo de almoço (em minutos)
+            function minFromHHMM(v, dflt) { const t = v || dflt; const [h, m] = t.split(':').map(Number); return h * 60 + m; }
+            const minAlmoco = Math.max(0, minFromHHMM(funcDados.horario_almoco_fim, '14:00') - minFromHHMM(funcDados.horario_almoco_inicio, '13:00'));
 
-            let totalAtraso = 0, totalExtra = 0;
+            let csv = '\uFEFF'; 
+            csv += `RELATÓRIO DE PONTO;${nomeFuncionario}\nMês Referência;${mesAno}\n`;
+            csv += `Horário de Trabalho;${funcDados.horario_entrada || '08:00'} às ${funcDados.horario_saida || '17:00'}\n`;
+            csv += `Almoço;${funcDados.horario_almoco_inicio || '13:00'} às ${funcDados.horario_almoco_fim || '14:00'} (${minAlmoco}min)\n\n`;
+            csv += `Data;Entrada;Saída;Atraso (Minutos);Hora Extra (Minutos);Trabalhado;Status\n`;
+
+            let totalAtraso = 0, totalExtra = 0, totalTrabalhado = 0;
 
             for (let d = 1; d <= ultimoDiaNumero; d++) {
                 const dataISO = `${ano}-${mes}-${String(d).padStart(2, '0')}`;
                 const dataBR = `${String(d).padStart(2, '0')}/${mes}/${ano}`;
                 const reg = (registros || []).find(r => r.data_registro === dataISO);
 
-                let inT = '--:--', outT = '--:--', atrs = 0, extr = 0, st = 'Falta';
+                let inT = '--:--', outT = '--:--', atrs = 0, extr = 0, trab = 0, st = 'Falta';
 
                 if (reg) {
                     if (reg.clock_in) {
@@ -385,17 +408,23 @@ document.addEventListener('DOMContentLoaded', () => {
                         const [hS, mS] = (funcDados.horario_saida || '17:00').split(':');
                         const diff = (new Date(reg.clock_out).getHours() * 60 + new Date(reg.clock_out).getMinutes()) - (hS * 60 + parseInt(mS));
                         if (diff > 5) extr = diff;
+                        if (reg.clock_in) {
+                            // Tempo trabalhado descontando o almoço
+                            const totalMin = (new Date(reg.clock_out) - new Date(reg.clock_in)) / 60000;
+                            trab = Math.max(0, totalMin - minAlmoco);
+                        }
                     }
                     st = (reg.clock_in && reg.clock_out) ? 'Completo' : 'Trabalhando';
-                    totalAtraso += atrs; totalExtra += extr;
+                    totalAtraso += atrs; totalExtra += extr; totalTrabalhado += trab;
                 }
                 // "=" previne erros de data no Excel
-                csv += `="${dataBR}";${inT};${outT};${atrs};${extr};${st}\n`;
+                csv += `="${dataBR}";${inT};${outT};${atrs};${extr};${formatarTempo(trab)};${st}\n`;
             }
 
             csv += `\nRESUMO\n`;
             csv += `Total Atrasos:;${formatarTempo(totalAtraso)}\n`;
             csv += `Total Horas Extras:;${formatarTempo(totalExtra)}\n`;
+            csv += `Total Trabalhado:;${formatarTempo(totalTrabalhado)}\n`;
 
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
