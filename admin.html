@@ -59,11 +59,18 @@
                     <div class="bg-white p-6 rounded-xl shadow-sm border-l-4 border-slate-900 flex items-center justify-between"><div><p class="text-xs sm:text-sm font-bold text-slate-500 uppercase">Equipe Ativa</p><p class="text-2xl sm:text-3xl font-black text-slate-800 mt-1" id="dash-total">0</p></div><div class="text-3xl opacity-20">👥</div></div>
                     <div class="bg-white p-6 rounded-xl shadow-sm border-l-4 border-emerald-500 flex items-center justify-between"><div><p class="text-xs sm:text-sm font-bold text-slate-500 uppercase">Presentes Hoje</p><p class="text-2xl sm:text-3xl font-black text-slate-800 mt-1" id="dash-presentes">0</p></div><div class="text-3xl opacity-20">🟢</div></div>
                     <div class="bg-white p-6 rounded-xl shadow-sm border-l-4 border-red-500 flex items-center justify-between"><div><p class="text-xs sm:text-sm font-bold text-slate-500 uppercase">Faltas / Pendentes</p><p class="text-2xl sm:text-3xl font-black text-slate-800 mt-1" id="dash-pendentes">0</p></div><div class="text-3xl opacity-20">🔴</div></div>
+                    <div class="bg-white p-6 rounded-xl shadow-sm border-l-4 border-amber-500 flex items-center justify-between"><div><p class="text-xs sm:text-sm font-bold text-slate-500 uppercase">Sem Clock Out</p><p class="text-2xl sm:text-3xl font-black text-slate-800 mt-1" id="dash-sem-saida">0</p></div><div class="text-3xl opacity-20">🟡</div></div>
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     <div class="col-span-1 lg:col-span-2 bg-white rounded-xl shadow-sm overflow-hidden">
-                        <div class="bg-emerald-50 px-6 py-4 border-b border-emerald-100"><h3 id="titulo-presentes" class="font-bold text-emerald-800 uppercase tracking-wide">🟢 Já Fizeram Clock In</h3></div>
-                        <div class="p-4"><ul id="lista-presentes" class="space-y-3"></ul></div>
+                        <div class="bg-emerald-50 px-6 py-4 border-b border-emerald-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                            <h3 id="titulo-presentes" class="font-bold text-emerald-800 uppercase tracking-wide">🟢 Já Fizeram Clock In</h3>
+                            <div class="flex bg-white rounded-lg p-1 border border-emerald-100 shadow-sm">
+                                <button id="btn-filtro-todos" onclick="filtrarPresentes('todos')" class="px-3 py-1 text-xs font-bold rounded-md transition bg-emerald-600 text-white">Todos</button>
+                                <button id="btn-filtro-semsaida" onclick="filtrarPresentes('semsaida')" class="px-3 py-1 text-xs font-bold rounded-md transition text-slate-600">🟡 Sem Saída</button>
+                            </div>
+                        </div>
+                        <div class="p-4"><ul id="lista-presentes" class="space-y-3"></ul><p id="msg-semsaida-vazia" class="text-slate-500 text-sm text-center py-4 hidden">✅ Todos que entraram já registraram a saída!</p></div>
                     </div>
                     <div class="bg-white rounded-xl shadow-sm overflow-hidden">
                         <div class="bg-red-50 px-6 py-4 border-b border-red-100 flex justify-between items-center"><h3 class="font-bold text-red-800 uppercase tracking-wide">⚠️ Pendentes</h3></div>

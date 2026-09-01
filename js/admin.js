@@ -91,19 +91,40 @@ document.addEventListener('DOMContentLoaded', () => {
             const presentes = []; const pendentes = [];
             (equipe || []).forEach(func => {
                 const registroFunc = (pontosHoje || []).find(p => p.funcionario_id === func.id);
-                if (registroFunc && registroFunc.clock_in) presentes.push({ ...func, clock_in: registroFunc.clock_in });
+                if (registroFunc && registroFunc.clock_in) presentes.push({ ...func, clock_in: registroFunc.clock_in, clock_out: registroFunc.clock_out || null });
                 else pendentes.push(func);
             });
             document.getElementById('dash-total').textContent = equipe ? equipe.length : 0;
             document.getElementById('dash-presentes').textContent = presentes.length;
             document.getElementById('dash-pendentes').textContent = pendentes.length;
+            const semSaida = presentes.filter(p => !p.clock_out);
+            document.getElementById('dash-sem-saida').textContent = semSaida.length;
             const ulPresentes = document.getElementById('lista-presentes');
             ulPresentes.innerHTML = presentes.length === 0 ? '<li class="text-slate-500 text-sm">Ninguém bateu ponto ainda.</li>' : '';
+            // Reset do filtro para "Todos" a cada atualização do dashboard.
+            const btnFt = document.getElementById('btn-filtro-todos');
+            const btnFs = document.getElementById('btn-filtro-semsaida');
+            if (btnFt && btnFs) {
+                btnFt.classList.add('bg-emerald-600', 'text-white'); btnFt.classList.remove('text-slate-600');
+                btnFs.classList.remove('bg-amber-500', 'text-white'); btnFs.classList.add('text-slate-600');
+            }
+            const msgVazia = document.getElementById('msg-semsaida-vazia');
+            if (msgVazia) msgVazia.classList.add('hidden');
             presentes.forEach(p => {
                 // Hora do Clock In exibida no fuso de Portugal.
                 const inPT = window.converterTimestampPortugal(p.clock_in);
                 const horaIn = inPT ? inPT.horaFormatada : '--:--';
-                ulPresentes.innerHTML += `<li class="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-lg mb-2 shadow-sm"><div class="flex items-center gap-3"><img src="${p.foto_url || 'https://via.placeholder.com/150'}" class="w-10 h-10 rounded-full object-cover"><div><p class="font-bold text-slate-800 text-sm sm:text-base">${p.nome_completo}</p></div></div><div class="bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded text-sm">${horaIn}</div></li>`;
+                const temSaida = !!p.clock_out;
+                let blocoSaida, acoes = '';
+                if (temSaida) {
+                    const outPT = window.converterTimestampPortugal(p.clock_out);
+                    const horaOut = outPT ? outPT.horaFormatada : '--:--';
+                    blocoSaida = `<div class="bg-rose-100 text-rose-800 font-bold px-3 py-1 rounded text-sm">🔴 ${horaOut}</div>`;
+                } else {
+                    blocoSaida = `<div class="bg-amber-100 text-amber-800 font-bold px-3 py-1 rounded text-sm">🟡 Sem Saída</div>`;
+                    acoes = `<button onclick="avisarSaidaFuncionario(this)" class="text-xs text-white bg-amber-500 px-3 py-1 rounded font-bold hover:bg-amber-600 transition">Avisar</button>`;
+                }
+                ulPresentes.innerHTML += `<li data-tem-saida="${temSaida}" class="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-lg mb-2 shadow-sm"><div class="flex items-center gap-3"><img src="${p.foto_url || 'https://via.placeholder.com/150'}" class="w-10 h-10 rounded-full object-cover"><div><p class="font-bold text-slate-800 text-sm sm:text-base">${p.nome_completo}</p></div></div><div class="flex items-center gap-2"><div class="bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded text-sm">${horaIn}</div>${blocoSaida}${acoes}</div></li>`;
             });
             const ulPendentes = document.getElementById('lista-pendentes');
             ulPendentes.innerHTML = pendentes.length === 0 ? '<li class="text-slate-500 text-sm">Todos bateram o ponto! 🎉</li>' : '';
@@ -117,6 +138,37 @@ document.addEventListener('DOMContentLoaded', () => {
         alert('Notificação enviada com sucesso!');
         btn.textContent = '✅ Avisado';
         btn.classList.replace('bg-orange-500', 'bg-emerald-100');
+        btn.classList.add('text-emerald-700', 'cursor-default');
+        btn.disabled = true;
+    };
+
+    // Alterna a lista "Já Fizeram Clock In" entre Todos e Sem Saída (clock out pendente).
+    window.filtrarPresentes = function(modo) {
+        const btnTodos = document.getElementById('btn-filtro-todos');
+        const btnSem = document.getElementById('btn-filtro-semsaida');
+        const itens = document.querySelectorAll('#lista-presentes li[data-tem-saida]');
+        const msgVazia = document.getElementById('msg-semsaida-vazia');
+        if (modo === 'semsaida') {
+            btnTodos.classList.remove('bg-emerald-600', 'text-white'); btnTodos.classList.add('text-slate-600');
+            btnSem.classList.add('bg-amber-500', 'text-white'); btnSem.classList.remove('text-slate-600');
+            let visiveis = 0;
+            itens.forEach(li => {
+                if (li.dataset.temSaida === 'false') { li.style.display = ''; visiveis++; }
+                else { li.style.display = 'none'; }
+            });
+            if (msgVazia) msgVazia.classList.toggle('hidden', visiveis > 0);
+        } else {
+            btnSem.classList.remove('bg-amber-500', 'text-white'); btnSem.classList.add('text-slate-600');
+            btnTodos.classList.add('bg-emerald-600', 'text-white'); btnTodos.classList.remove('text-slate-600');
+            itens.forEach(li => { li.style.display = ''; });
+            if (msgVazia) msgVazia.classList.add('hidden');
+        }
+    };
+
+    window.avisarSaidaFuncionario = function(btn) {
+        alert('Lembrete de Clock Out enviado com sucesso!');
+        btn.textContent = '✅ Avisado';
+        btn.classList.replace('bg-amber-500', 'bg-emerald-100');
         btn.classList.add('text-emerald-700', 'cursor-default');
         btn.disabled = true;
     };
