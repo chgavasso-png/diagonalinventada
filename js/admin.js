@@ -123,6 +123,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     blocoSaida = `<div class="bg-amber-100 text-amber-800 font-bold px-3 py-1 rounded text-sm">🟡 Sem Saída</div>`;
                     acoes = `<button onclick="avisarSaidaFuncionario(this)" class="text-xs text-white bg-amber-500 px-3 py-1 rounded font-bold hover:bg-amber-600 transition">Avisar</button>`;
+                    // Botão "Forçar Saída" só aparece quando a hora atual (Portugal)
+                    // já passou do horário de saída programado do funcionário.
+                    const [sH, sM] = (p.horario_saida || '17:00').split(':').map(Number);
+                    const minSaida = (sH || 0) * 60 + (sM || 0);
+                    if (hojePT.minutosDoDia >= minSaida) {
+                        acoes += `<button onclick="forcarSaidaFuncionario('${p.id}', '${p.nome_completo}', '${p.horario_saida || '17:00'}')" class="text-xs text-white bg-purple-600 px-3 py-1 rounded font-bold hover:bg-purple-700 transition">⚡ Forçar Saída</button>`;
+                    }
                 }
                 ulPresentes.innerHTML += `<li data-tem-saida="${temSaida}" class="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-lg mb-2 shadow-sm"><div class="flex items-center gap-3"><img src="${p.foto_url || 'https://via.placeholder.com/150'}" class="w-10 h-10 rounded-full object-cover"><div><p class="font-bold text-slate-800 text-sm sm:text-base">${p.nome_completo}</p></div></div><div class="flex items-center gap-2"><div class="bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded text-sm">${horaIn}</div>${blocoSaida}${acoes}</div></li>`;
             });
@@ -171,6 +178,27 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.classList.replace('bg-amber-500', 'bg-emerald-100');
         btn.classList.add('text-emerald-700', 'cursor-default');
         btn.disabled = true;
+    };
+
+    // Força o Clock Out de um funcionário para o dia de hoje, registrando a
+    // saída no horário programado (horario_saida). Só é visível no dashboard
+    // quando a hora atual de Portugal já passou desse horário. Atualiza APENAS
+    // o registo da pessoa selecionada (filtro por funcionario_id + id).
+    window.forcarSaidaFuncionario = async function(id, nome, horarioSaida) {
+        if (!id) { alert('Funcionário inválido.'); return; }
+        const saidaCurta = (horarioSaida || '17:00').slice(0, 5); // 'HH:mm'
+        if (!confirm(`Forçar Clock Out de ${nome}?\n\nSerá registrado o horário de saída programado: ${saidaCurta}.`)) return;
+        try {
+            const strHoje = window.obterHorarioPortugal().dataISO;
+            const timestamp = window.comporTimestampPortugal(strHoje, saidaCurta);
+            const { data: registro } = await window.bancoDeDados.from('registros_ponto')
+                .select('id').eq('funcionario_id', id).eq('data_registro', strHoje).single();
+            if (!registro) { alert('Registo de hoje não encontrado. O funcionário precisa fazer Clock In primeiro.'); return; }
+            await window.bancoDeDados.from('registros_ponto')
+                .update({ clock_out: timestamp, inserido_por_admin: true }).eq('id', registro.id);
+            alert('✅ Clock Out forçado com sucesso!');
+            carregarDashboard();
+        } catch (err) { alert('Erro ao forçar o Clock Out.'); }
     };
 
     let fotoBase64Temporaria = null; 
