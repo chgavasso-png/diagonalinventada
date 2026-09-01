@@ -80,8 +80,11 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('nav-ponto').addEventListener('click', () => mudarAba('ponto'));
 
     async function carregarDashboard() {
-        const strHoje = new Date().toLocaleDateString('en-CA'); 
-        document.getElementById('titulo-presentes').textContent = `🟢 Já Fizeram Clock In (${new Date().toLocaleDateString('pt-BR')})`;
+        // "Hoje" no fuso de Portugal (não do dispositivo do admin).
+        const hojePT = window.obterHorarioPortugal();
+        const strHoje = hojePT.dataISO; 
+        const dataObj = new Date(`${hojePT.dataISO}T12:00:00`);
+        document.getElementById('titulo-presentes').textContent = `🟢 Já Fizeram Clock In (${dataObj.toLocaleDateString('pt-BR')})`;
         try {
             const { data: equipe } = await window.bancoDeDados.from('funcionarios').select('*').eq('status', true);
             const { data: pontosHoje } = await window.bancoDeDados.from('registros_ponto').select('*').eq('data_registro', strHoje);
@@ -97,7 +100,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const ulPresentes = document.getElementById('lista-presentes');
             ulPresentes.innerHTML = presentes.length === 0 ? '<li class="text-slate-500 text-sm">Ninguém bateu ponto ainda.</li>' : '';
             presentes.forEach(p => {
-                ulPresentes.innerHTML += `<li class="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-lg mb-2 shadow-sm"><div class="flex items-center gap-3"><img src="${p.foto_url || 'https://via.placeholder.com/150'}" class="w-10 h-10 rounded-full object-cover"><div><p class="font-bold text-slate-800 text-sm sm:text-base">${p.nome_completo}</p></div></div><div class="bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded text-sm">${new Date(p.clock_in).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div></li>`;
+                // Hora do Clock In exibida no fuso de Portugal.
+                const inPT = window.converterTimestampPortugal(p.clock_in);
+                const horaIn = inPT ? inPT.horaFormatada : '--:--';
+                ulPresentes.innerHTML += `<li class="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-lg mb-2 shadow-sm"><div class="flex items-center gap-3"><img src="${p.foto_url || 'https://via.placeholder.com/150'}" class="w-10 h-10 rounded-full object-cover"><div><p class="font-bold text-slate-800 text-sm sm:text-base">${p.nome_completo}</p></div></div><div class="bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded text-sm">${horaIn}</div></li>`;
             });
             const ulPendentes = document.getElementById('lista-pendentes');
             ulPendentes.innerHTML = pendentes.length === 0 ? '<li class="text-slate-500 text-sm">Todos bateram o ponto! 🎉</li>' : '';
@@ -230,7 +236,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.abrirModalForcar = function(id, nome) {
         document.getElementById('forcar-id').value = id; document.getElementById('forcar-nome').textContent = nome;
-        document.getElementById('forcar-data').value = new Date().toLocaleDateString('en-CA');
+        // Pré-preenche a data com "hoje" no horário de Portugal.
+        document.getElementById('forcar-data').value = window.obterHorarioPortugal().dataISO;
         document.getElementById('modal-forcar-ponto').classList.replace('hidden', 'flex');
     };
 
@@ -238,7 +245,12 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         const id = document.getElementById('forcar-id').value; const dataStr = document.getElementById('forcar-data').value;
         const tipo = document.getElementById('forcar-tipo').value; const horaStr = document.getElementById('forcar-hora').value;
-        const timestamp = new Date(`${dataStr}T${horaStr}:00`).toISOString();
+        // Guarda de segurança: o id do funcionário é obrigatório para garantir
+        // que o ponto forçado afete APENAS a pessoa selecionada (nunca todos).
+        if (!id) { alert('Nenhum funcionário selecionado. Feche o modal e tente novamente.'); return; }
+        if (!dataStr || !horaStr) { alert('Preencha a data e o horário.'); return; }
+        // Compõe o timestamp interpretando a data/hora como horário de Portugal.
+        const timestamp = window.comporTimestampPortugal(dataStr, horaStr);
         try {
             const { data: registro } = await window.bancoDeDados.from('registros_ponto').select('id').eq('funcionario_id', id).eq('data_registro', dataStr).single();
             if (registro) {
@@ -255,8 +267,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const inputMesAno = document.getElementById('ponto-mes-ano');
-    const hojeData = new Date();
-    inputMesAno.value = `${hojeData.getFullYear()}-${String(hojeData.getMonth() + 1).padStart(2, '0')}`;
+    // Mês atual no horário de Portugal (não do dispositivo).
+    const hojeMes = window.obterHorarioPortugal();
+    const partesHoje = hojeMes.dataISO.split('-');
+    inputMesAno.value = `${partesHoje[0]}-${partesHoje[1]}`;
     inputMesAno.addEventListener('change', carregarPastasPonto);
 
     async function carregarPastasPonto() {
@@ -283,12 +297,23 @@ document.addEventListener('DOMContentLoaded', () => {
         if (totalMinutos <= 0) return '0m';
         const d = Math.floor(totalMinutos / 1440);
         const h = Math.floor((totalMinutos % 1440) / 60);
-        const m = totalMinutos % 60;
+        const m = Math.floor(totalMinutos % 60);
         let str = '';
         if (d > 0) str += `${d}d, `;
         if (h > 0) str += `${h}h `;
         str += `${m}m`;
         return str;
+    }
+    // Formata minutos em HH:MM:SS (floored ao segundo, sem frações/millisegundos).
+    // Minutos e segundos sempre com 2 dígitos; as horas usam padStart(2) para
+    // "sempre 2 dígitos" no caso comum (ex.: 08:00:00) mas crescem sem limite
+    // para totais mensais grandes (ex.: 168:00:00 num mês completo).
+    function formatarHoraMinSeg(totalMinutos) {
+        const totalSeg = Math.floor((totalMinutos || 0) * 60);
+        const h = Math.floor(totalSeg / 3600);
+        const m = Math.floor((totalSeg % 3600) / 60);
+        const s = totalSeg % 60;
+        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     }
 
     window.abrirRelatorioTela = async function(idFuncionario, nomeFuncionario) {
@@ -296,7 +321,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!mesAno) return alert('Selecione um mês!');
         const [ano, mes] = mesAno.split('-');
         const primeiroDiaStr = `${ano}-${mes}-01`;
-        const ultimoDiaNumero = new Date(ano, mes, 0).getDate();
+        // Último dia do mês (usa 0 como dia = último dia do mês anterior ao informado).
+        const ultimoDiaNumero = new Date(Number(ano), Number(mes), 0).getDate();
         const ultimoDiaStr = `${ano}-${mes}-${String(ultimoDiaNumero).padStart(2, '0')}`;
 
         document.getElementById('relatorio-tela-nome').textContent = nomeFuncionario;
@@ -325,20 +351,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 let status = '<span class="bg-slate-100 text-slate-500 px-2 py-1 rounded text-[10px] sm:text-xs">Vazio</span>';
 
                 if (reg) {
-                    if (reg.clock_in) {
-                        inTime = new Date(reg.clock_in).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-                        const hE = funcDados.horario_entrada ? parseInt(funcDados.horario_entrada.split(':')[0]) : 8;
-                        const mE = funcDados.horario_entrada ? parseInt(funcDados.horario_entrada.split(':')[1]) : 0;
-                        const diff = (new Date(reg.clock_in).getHours() * 60 + new Date(reg.clock_in).getMinutes()) - (hE * 60 + mE);
-                        if (diff > 5) atraso = diff;
+                    // Conversão das horas para o fuso de Portugal (ignora o fuso do dispositivo).
+                    const inPT = window.converterTimestampPortugal(reg.clock_in);
+                    const outPT = window.converterTimestampPortugal(reg.clock_out);
+                    if (inPT) {
+                        inTime = inPT.horaFormatada;
+                        const [hE, mE] = (funcDados.horario_entrada || '08:00').split(':').map(Number);
+                        const diff = inPT.minutosDoDia - (hE * 60 + mE);
+                        // Atraso só conta acima de 20 min de tolerância.
+                        if (diff > 20) atraso = diff;
                     }
-                    if (reg.clock_out) {
-                        outTime = new Date(reg.clock_out).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-                        const hS = funcDados.horario_saida ? parseInt(funcDados.horario_saida.split(':')[0]) : 17;
-                        const mS = funcDados.horario_saida ? parseInt(funcDados.horario_saida.split(':')[1]) : 0;
-                        const diff = (new Date(reg.clock_out).getHours() * 60 + new Date(reg.clock_out).getMinutes()) - (hS * 60 + mS);
-                        if (diff > 5) extra = diff;
-                        if (reg.clock_in) {
+                    if (outPT) {
+                        outTime = outPT.horaFormatada;
+                        const [hS, mS] = (funcDados.horario_saida || '17:00').split(':').map(Number);
+                        const diff = outPT.minutosDoDia - (hS * 60 + mS);
+                        // Hora extra só conta acima de 20 min de tolerância.
+                        if (diff > 20) extra = diff;
+                        if (inPT) {
+                            // Tempo trabalhado descontando o almoço (em minutos, independente de fuso).
                             const totalMin = (new Date(reg.clock_out) - new Date(reg.clock_in)) / 60000;
                             trabalhado = Math.max(0, totalMin - minAlmoco);
                         }
@@ -370,7 +400,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!mesAno) return alert('Selecione um mês!');
         const [ano, mes] = mesAno.split('-');
         const primeiroDiaStr = `${ano}-${mes}-01`;
-        const ultimoDiaNumero = new Date(ano, mes, 0).getDate();
+        const ultimoDiaNumero = new Date(Number(ano), Number(mes), 0).getDate();
         const ultimoDiaStr = `${ano}-${mes}-${String(ultimoDiaNumero).padStart(2, '0')}`;
 
         try {
@@ -385,7 +415,7 @@ document.addEventListener('DOMContentLoaded', () => {
             csv += `RELATÓRIO DE PONTO;${nomeFuncionario}\nMês Referência;${mesAno}\n`;
             csv += `Horário de Trabalho;${funcDados.horario_entrada || '08:00'} às ${funcDados.horario_saida || '17:00'}\n`;
             csv += `Almoço;${funcDados.horario_almoco_inicio || '13:00'} às ${funcDados.horario_almoco_fim || '14:00'} (${minAlmoco}min)\n\n`;
-            csv += `Data;Entrada;Saída;Atraso (Minutos);Hora Extra (Minutos);Trabalhado;Status\n`;
+            csv += `Data;Entrada;Saída;Atraso;Hora Extra;Trabalhado;Status\n`;
 
             let totalAtraso = 0, totalExtra = 0, totalTrabalhado = 0;
 
@@ -397,19 +427,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 let inT = '--:--', outT = '--:--', atrs = 0, extr = 0, trab = 0, st = 'Falta';
 
                 if (reg) {
-                    if (reg.clock_in) {
-                        inT = new Date(reg.clock_in).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-                        const [hE, mE] = (funcDados.horario_entrada || '08:00').split(':');
-                        const diff = (new Date(reg.clock_in).getHours() * 60 + new Date(reg.clock_in).getMinutes()) - (hE * 60 + parseInt(mE));
-                        if (diff > 5) atrs = diff;
+                    // Conversão das horas para o fuso de Portugal (ignora o fuso do dispositivo).
+                    const inPT = window.converterTimestampPortugal(reg.clock_in);
+                    const outPT = window.converterTimestampPortugal(reg.clock_out);
+                    if (inPT) {
+                        inT = inPT.horaFormatada;
+                        const [hE, mE] = (funcDados.horario_entrada || '08:00').split(':').map(Number);
+                        const diff = inPT.minutosDoDia - (hE * 60 + mE);
+                        // Atraso só conta acima de 20 min de tolerância.
+                        if (diff > 20) atrs = diff;
                     }
-                    if (reg.clock_out) {
-                        outT = new Date(reg.clock_out).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-                        const [hS, mS] = (funcDados.horario_saida || '17:00').split(':');
-                        const diff = (new Date(reg.clock_out).getHours() * 60 + new Date(reg.clock_out).getMinutes()) - (hS * 60 + parseInt(mS));
-                        if (diff > 5) extr = diff;
-                        if (reg.clock_in) {
-                            // Tempo trabalhado descontando o almoço
+                    if (outPT) {
+                        outT = outPT.horaFormatada;
+                        const [hS, mS] = (funcDados.horario_saida || '17:00').split(':').map(Number);
+                        const diff = outPT.minutosDoDia - (hS * 60 + mS);
+                        // Hora extra só conta acima de 20 min de tolerância.
+                        if (diff > 20) extr = diff;
+                        if (inPT) {
+                            // Tempo trabalhado descontando o almoço (em minutos, independente de fuso).
                             const totalMin = (new Date(reg.clock_out) - new Date(reg.clock_in)) / 60000;
                             trab = Math.max(0, totalMin - minAlmoco);
                         }
@@ -418,13 +453,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     totalAtraso += atrs; totalExtra += extr; totalTrabalhado += trab;
                 }
                 // "=" previne erros de data no Excel
-                csv += `="${dataBR}";${inT};${outT};${atrs};${extr};${formatarTempo(trab)};${st}\n`;
+                csv += `="${dataBR}";${inT};${outT};${formatarHoraMinSeg(atrs)};${formatarHoraMinSeg(extr)};${formatarHoraMinSeg(trab)};${st}\n`;
             }
 
             csv += `\nRESUMO\n`;
-            csv += `Total Atrasos:;${formatarTempo(totalAtraso)}\n`;
-            csv += `Total Horas Extras:;${formatarTempo(totalExtra)}\n`;
-            csv += `Total Trabalhado:;${formatarTempo(totalTrabalhado)}\n`;
+            csv += `Total Atrasos:;${formatarHoraMinSeg(totalAtraso)}\n`;
+            csv += `Total Horas Extras:;${formatarHoraMinSeg(totalExtra)}\n`;
+            csv += `Total Trabalhado:;${formatarHoraMinSeg(totalTrabalhado)}\n`;
 
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
@@ -437,6 +472,113 @@ document.addEventListener('DOMContentLoaded', () => {
             document.body.removeChild(link);
         } catch (err) { alert('Erro ao gerar Excel.'); }
     };
+    // -------------------------------------------------------------------------
+    // Relatório CONSOLIDADO: baixa TODOS os funcionários num único ficheiro
+    // Excel (.xlsx), com uma aba por funcionário + uma aba de Resumo Geral.
+    // Usa a biblioteca SheetJS (XLSX), carregada via CDN no admin.html.
+    // -------------------------------------------------------------------------
+    window.baixarRelatorioTodosExcel = async function() {
+        const mesAno = document.getElementById('ponto-mes-ano').value;
+        if (!mesAno) return alert('Selecione um mês!');
+        if (typeof XLSX === 'undefined') return alert('Biblioteca Excel não carregou. Recarregue a página e tente novamente.');
+
+        const [ano, mes] = mesAno.split('-');
+        const primeiroDiaStr = `${ano}-${mes}-01`;
+        const ultimoDiaNumero = new Date(Number(ano), Number(mes), 0).getDate();
+        const ultimoDiaStr = `${ano}-${mes}-${String(ultimoDiaNumero).padStart(2, '0')}`;
+
+        const btn = document.querySelector('[onclick*="baixarRelatorioTodosExcel"]');
+        const txtOriginal = btn ? btn.innerHTML : '';
+        if (btn) { btn.disabled = true; btn.innerHTML = '<span>⏳</span> Gerando...'; }
+
+        try {
+            const { data: funcionarios } = await window.bancoDeDados.from('funcionarios').select('id, nome_completo, horario_entrada, horario_saida, horario_almoco_inicio, horario_almoco_fim').order('nome_completo');
+            const { data: registros } = await window.bancoDeDados.from('registros_ponto').select('*').gte('data_registro', primeiroDiaStr).lte('data_registro', ultimoDiaStr);
+            if (!funcionarios || funcionarios.length === 0) { alert('Nenhum funcionário encontrado.'); return; }
+
+            const wb = XLSX.utils.book_new();
+            const resumoGeral = [['Funcionário', 'Horário', 'Atrasos', 'Horas Extras', 'Trabalhado']];
+            function minFromHHMM(v, dflt) { const t = v || dflt; const [h, m] = t.split(':').map(Number); return h * 60 + m; }
+            // Acumuladores para o TOTAL GERAL do mês (soma de todos os funcionários).
+            let geralAtraso = 0, geralExtra = 0, geralTrabalhado = 0;
+
+            funcionarios.forEach(func => {
+                const minAlmoco = Math.max(0, minFromHHMM(func.horario_almoco_fim, '14:00') - minFromHHMM(func.horario_almoco_inicio, '13:00'));
+                const horarioStr = `${func.horario_entrada || '08:00'}-${func.horario_saida || '17:00'}`;
+                const dados = [
+                    [`RELATÓRIO DE PONTO - ${func.nome_completo}`],
+                    [`Mês Referência: ${mesAno}`],
+                    [`Horário de Trabalho: ${func.horario_entrada || '08:00'} às ${func.horario_saida || '17:00'}`],
+                    [`Almoço: ${func.horario_almoco_inicio || '13:00'} às ${func.horario_almoco_fim || '14:00'} (${minAlmoco}min)`],
+                    [],
+                    ['Data', 'Entrada', 'Saída', 'Atraso', 'Hora Extra', 'Trabalhado', 'Status']
+                ];
+                let totalAtraso = 0, totalExtra = 0, totalTrabalhado = 0;
+                for (let d = 1; d <= ultimoDiaNumero; d++) {
+                    const dataISO = `${ano}-${mes}-${String(d).padStart(2, '0')}`;
+                    const dataBR = `${String(d).padStart(2, '0')}/${mes}/${ano}`;
+                    const reg = (registros || []).find(r => r.funcionario_id === func.id && r.data_registro === dataISO);
+                    let inT = '--:--', outT = '--:--', atrs = 0, extr = 0, trab = 0, st = 'Falta';
+                    if (reg) {
+                        const inPT = window.converterTimestampPortugal(reg.clock_in);
+                        const outPT = window.converterTimestampPortugal(reg.clock_out);
+                        if (inPT) {
+                            inT = inPT.horaFormatada;
+                            const [hE, mE] = (func.horario_entrada || '08:00').split(':').map(Number);
+                            const diff = inPT.minutosDoDia - (hE * 60 + mE);
+                            if (diff > 20) atrs = diff;
+                        }
+                        if (outPT) {
+                            outT = outPT.horaFormatada;
+                            const [hS, mS] = (func.horario_saida || '17:00').split(':').map(Number);
+                            const diff = outPT.minutosDoDia - (hS * 60 + mS);
+                            if (diff > 20) extr = diff;
+                            if (inPT) {
+                                const totalMin = (new Date(reg.clock_out) - new Date(reg.clock_in)) / 60000;
+                                trab = Math.max(0, totalMin - minAlmoco);
+                            }
+                        }
+                        st = (reg.clock_in && reg.clock_out) ? 'Completo' : 'Trabalhando';
+                        totalAtraso += atrs; totalExtra += extr; totalTrabalhado += trab;
+                    }
+                    dados.push([dataBR, inT, outT, formatarHoraMinSeg(atrs), formatarHoraMinSeg(extr), formatarHoraMinSeg(trab), st]);
+                }
+                dados.push([]);
+                dados.push(['RESUMO']);
+                dados.push(['Total Atrasos:', formatarHoraMinSeg(totalAtraso)]);
+                dados.push(['Total Horas Extras:', formatarHoraMinSeg(totalExtra)]);
+                dados.push(['Total Trabalhado:', formatarHoraMinSeg(totalTrabalhado)]);
+                // Soma para o TOTAL GERAL do mês (todas as horas somadas).
+                geralAtraso += totalAtraso; geralExtra += totalExtra; geralTrabalhado += totalTrabalhado;
+
+                let nomeAba = func.nome_completo.substring(0, 28).replace(/[\\\/\?\*\[\]:]/g, '');
+                if (!nomeAba) nomeAba = `Func_${func.id}`;
+                let sufixo = ''; let n = 2;
+                while (wb.SheetNames.includes(nomeAba + sufixo)) { sufixo = '_' + n; n++; }
+                const ws = XLSX.utils.aoa_to_sheet(dados);
+                XLSX.utils.book_append_sheet(wb, ws, nomeAba + sufixo);
+                resumoGeral.push([func.nome_completo, horarioStr, formatarHoraMinSeg(totalAtraso), formatarHoraMinSeg(totalExtra), formatarHoraMinSeg(totalTrabalhado)]);
+            });
+
+            // Totalização do mês inteiro: soma as horas de TODOS os funcionários.
+            resumoGeral.push([]);
+            resumoGeral.push(['TOTAL GERAL', '', formatarHoraMinSeg(geralAtraso), formatarHoraMinSeg(geralExtra), formatarHoraMinSeg(geralTrabalhado)]);
+
+            const wsResumo = XLSX.utils.aoa_to_sheet(resumoGeral);
+            XLSX.utils.book_append_sheet(wb, wsResumo, 'Resumo Geral');
+            wb.SheetNames.splice(wb.SheetNames.indexOf('Resumo Geral'), 1);
+            wb.SheetNames.unshift('Resumo Geral');
+
+            XLSX.writeFile(wb, `Relatorio_Todos_${mesAno}.xlsx`);
+        } catch (err) {
+            console.error(err);
+            alert('Erro ao gerar o relatório de todos.');
+        } finally {
+            if (btn) { btn.disabled = false; btn.innerHTML = txtOriginal; }
+        }
+    };
+
+
 
     mudarAba('dashboard');
 });

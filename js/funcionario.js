@@ -54,13 +54,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 function atualizarRelogio() {
-    const agora = new Date();
+    // Relógio sempre no horário de Portugal (Europe/Lisbon), ignorando o fuso do dispositivo.
+    const agora = window.obterHorarioPortugal();
+    document.getElementById('relogio').textContent = agora.horaFormatada;
+    const dataObj = new Date(`${agora.dataISO}T12:00:00`);
     const opcoesData = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-    document.getElementById('data-atual').textContent = agora.toLocaleDateString('pt-BR', opcoesData);
-    const horas = String(agora.getHours()).padStart(2, '0');
-    const minutos = String(agora.getMinutes()).padStart(2, '0');
-    const segundos = String(agora.getSeconds()).padStart(2, '0');
-    document.getElementById('relogio').textContent = `${horas}:${minutos}:${segundos}`;
+    document.getElementById('data-atual').textContent = dataObj.toLocaleDateString('pt-BR', opcoesData);
 }
 
 function mostrarMensagem(texto, tipo) {
@@ -82,8 +81,9 @@ async function registrarPonto(tipo, funcionarioId) {
         const { data: funcDados, error: errFunc } = await window.bancoDeDados.from('funcionarios').select('horario_entrada, horario_saida').eq('id', funcionarioId).single();
         if (errFunc) throw new Error('Erro ao buscar regras de horário.');
 
-        const agora = new Date();
-        const horaAtualMinutos = (agora.getHours() * 60) + agora.getMinutes();
+        // Horário fixo de Portugal (Figueira da Foz - Europe/Lisbon), não do dispositivo.
+        const agora = window.obterHorarioPortugal();
+        const horaAtualMinutos = agora.minutosDoDia;
 
         if (tipo === 'entrada' && funcDados.horario_entrada) {
             const [hEntrada, mEntrada] = funcDados.horario_entrada.split(':').map(Number);
@@ -102,42 +102,51 @@ async function registrarPonto(tipo, funcionarioId) {
             let diff = horaAtualMinutos - minSaidaOficial;
             if (diff < -720) diff += 1440; if (diff > 720) diff -= 1440;
 
+            // Limite mínimo: 20 minutos ANTES do horário de saída (tolerância).
             if (diff < -20) {
-                mostrarMensagem(`⏰ Muito cedo! Você não pode bater a saída antes das ${String(hSaida).padStart(2,'0')}:${String(mSaida-20).padStart(2,'0')}.`, 'erro');
+                const limiteMin = minSaidaOficial - 20;
+                const hLim = Math.floor(limiteMin / 60) % 24;
+                const mLim = limiteMin % 60;
+                mostrarMensagem(`⏰ Muito cedo! Você não pode bater a saída antes das ${String(hLim).padStart(2,'0')}:${String(mLim).padStart(2,'0')}.`, 'erro');
                 return;
             }
-            // Bloqueio de Hora Extra pelo App do Funcionário
-            if (diff > 5) {
+            // Clock Out permite até 20 minutos DEPOIS do horário (tolerância).
+            // Acima de 20 minutos, só o Administrador pode registrar (hora extra).
+            if (diff > 20) {
                 mostrarMensagem(`⏰ Expediente encerrado! Apenas o Administrador pode registrar saídas com Hora Extra no painel.`, 'erro');
                 return;
             }
         }
 
-        const hoje = agora.toLocaleDateString('en-CA'); 
+        // Data de hoje no fuso de Portugal (para a coluna data_registro).
+        const hoje = agora.dataISO; 
         const { data: registroHoje } = await window.bancoDeDados.from('registros_ponto').select('*').eq('funcionario_id', funcionarioId).eq('data_registro', hoje).single();
 
         if (tipo === 'entrada') {
             if (registroHoje && registroHoje.clock_in) return mostrarMensagem('⚠️ Você já fez Clock In hoje!', 'erro');
-            await window.bancoDeDados.from('registros_ponto').insert([{ funcionario_id: funcionarioId, data_registro: hoje, clock_in: agora.toISOString(), inserido_por_admin: false }]);
+            await window.bancoDeDados.from('registros_ponto').insert([{ funcionario_id: funcionarioId, data_registro: hoje, clock_in: agora.timestampISO, inserido_por_admin: false }]);
             mostrarMensagem('✅ CLOCK IN registrado com sucesso!', 'sucesso');
             
         } else if (tipo === 'saida') {
             if (!registroHoje || !registroHoje.clock_in) return mostrarMensagem('⚠️ Você precisa fazer Clock In antes de fazer Clock Out.', 'erro');
             if (registroHoje.clock_out) return mostrarMensagem('⚠️ Você já fez Clock Out hoje!', 'erro');
-            await window.bancoDeDados.from('registros_ponto').update({ clock_out: agora.toISOString() }).eq('id', registroHoje.id);
+            await window.bancoDeDados.from('registros_ponto').update({ clock_out: agora.timestampISO }).eq('id', registroHoje.id);
             mostrarMensagem('✅ CLOCK OUT registrado com sucesso!', 'sucesso');
         }
 
-        await window.bancoDeDados.from('logs_atividade').insert([{ usuario_id: funcionarioId, acao: tipo === 'entrada' ? 'Clock In' : 'Clock Out', timestamp: agora.toISOString() }]);
+        await window.bancoDeDados.from('logs_atividade').insert([{ usuario_id: funcionarioId, acao: tipo === 'entrada' ? 'Clock In' : 'Clock Out', timestamp: agora.timestampISO }]);
         carregarHistorico(funcionarioId);
 
     } catch (error) { mostrarMensagem('❌ Ocorreu um erro ao processar o ponto.', 'erro'); }
 }
 
 async function carregarHistorico(funcionarioId) {
-    const dataAtual = new Date();
-    const primeiroDia = new Date(dataAtual.getFullYear(), dataAtual.getMonth(), 1).toLocaleDateString('en-CA');
-    const ultimoDia = new Date(dataAtual.getFullYear(), dataAtual.getMonth() + 1, 0).toLocaleDateString('en-CA');
+    // Mês atual no horário de Portugal (não do dispositivo).
+    const hojePT = window.obterHorarioPortugal();
+    const [ano, mes] = hojePT.dataISO.split('-');
+    const primeiroDia = `${ano}-${mes}-01`;
+    const ultimoDiaNum = new Date(Number(ano), Number(mes), 0).getDate();
+    const ultimoDia = `${ano}-${mes}-${String(ultimoDiaNum).padStart(2, '0')}`;
 
     const lista = document.getElementById('lista-historico');
     const { data: registros, error } = await window.bancoDeDados.from('registros_ponto').select('*').eq('funcionario_id', funcionarioId).gte('data_registro', primeiroDia).lte('data_registro', ultimoDia).order('data_registro', { ascending: false });
@@ -150,8 +159,11 @@ async function carregarHistorico(funcionarioId) {
     lista.innerHTML = ''; 
     registros.forEach(reg => {
         const dataFormatada = new Date(reg.data_registro + 'T12:00:00').toLocaleDateString('pt-BR');
-        const horaEntrada = reg.clock_in ? new Date(reg.clock_in).toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'}) : '--:--';
-        const horaSaida = reg.clock_out ? new Date(reg.clock_out).toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'}) : '--:--';
+        // Horas sempre exibidas no fuso de Portugal, independentemente do dispositivo.
+        const inPT = window.converterTimestampPortugal(reg.clock_in);
+        const outPT = window.converterTimestampPortugal(reg.clock_out);
+        const horaEntrada = inPT ? inPT.horaFormatada : '--:--';
+        const horaSaida = outPT ? outPT.horaFormatada : '--:--';
 
         lista.innerHTML += `
             <div class="flex flex-col sm:flex-row justify-between items-center bg-slate-50 p-3 sm:p-4 rounded-lg border border-slate-200 gap-2 sm:gap-4 hover:shadow-sm transition">

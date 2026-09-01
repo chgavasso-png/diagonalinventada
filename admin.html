@@ -86,7 +86,10 @@
             <div id="section-ponto" class="fade-in hidden bg-white rounded-xl shadow-sm overflow-hidden">
                 <div class="px-6 py-5 border-b border-slate-100 bg-slate-50 flex flex-col sm:flex-row justify-between items-center gap-4">
                     <div><h3 class="font-bold text-slate-800 uppercase tracking-wide">Pastas de Ponto</h3><p class="text-sm text-slate-500 mt-1">Visualize e baixe relatórios.</p></div>
-                    <input type="month" id="ponto-mes-ano" class="px-4 py-2 border rounded-lg">
+                    <div class="flex items-center gap-2 w-full sm:w-auto">
+                        <input type="month" id="ponto-mes-ano" class="px-4 py-2 border rounded-lg flex-1 sm:flex-none">
+                        <button onclick="baixarRelatorioTodosExcel()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center justify-center gap-2 transition shadow-sm whitespace-nowrap"><span>📊</span> Baixar Todos (Excel)</button>
+                    </div>
                 </div>
                 <div class="p-6"><div id="lista-pastas-ponto" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"></div></div>
             </div>
@@ -184,7 +187,9 @@
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="./js/supabase.js"></script>
+    <script src="./js/timezone.js"></script>
     <script src="./js/admin.js"></script>
 </body>
 </html>
