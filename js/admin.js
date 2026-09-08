@@ -50,23 +50,26 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Navegação SPA
-    const abas = ['dashboard', 'funcionarios', 'ponto'];
+    const abas = ['dashboard', 'gestao-dia', 'funcionarios', 'ponto'];
     function mudarAba(abaAtiva) {
         abas.forEach(aba => {
             const btn = document.getElementById(`nav-${aba}`);
             const sec = document.getElementById(`section-${aba}`);
-            if (aba === abaAtiva) {
-                sec.classList.remove('hidden');
-                btn.classList.add('bg-orange-500', 'text-white', 'shadow-md');
-                btn.classList.remove('text-slate-300', 'hover:bg-slate-800', 'hover:text-white');
-            } else {
-                sec.classList.add('hidden');
-                btn.classList.remove('bg-orange-500', 'text-white', 'shadow-md');
-                btn.classList.add('text-slate-300', 'hover:bg-slate-800', 'hover:text-white');
+            if (sec && btn) {
+                if (aba === abaAtiva) {
+                    sec.classList.remove('hidden');
+                    btn.classList.add('bg-orange-500', 'text-white', 'shadow-md');
+                    btn.classList.remove('text-slate-300', 'hover:bg-slate-800', 'hover:text-white');
+                } else {
+                    sec.classList.add('hidden');
+                    btn.classList.remove('bg-orange-500', 'text-white', 'shadow-md');
+                    btn.classList.add('text-slate-300', 'hover:bg-slate-800', 'hover:text-white');
+                }
             }
         });
 
         if (abaAtiva === 'dashboard') carregarDashboard();
+        else if (abaAtiva === 'gestao-dia') carregarGestaoDia();
         else if (abaAtiva === 'funcionarios') carregarTabelaFuncionarios();
         else if (abaAtiva === 'ponto') carregarPastasPonto();
 
@@ -76,6 +79,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     document.getElementById('nav-dashboard').addEventListener('click', () => mudarAba('dashboard'));
+    document.getElementById('nav-gestao-dia').addEventListener('click', () => mudarAba('gestao-dia'));
     document.getElementById('nav-funcionarios').addEventListener('click', () => mudarAba('funcionarios'));
     document.getElementById('nav-ponto').addEventListener('click', () => mudarAba('ponto'));
 
@@ -201,6 +205,310 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) { alert('Erro ao forçar o Clock Out.'); }
     };
 
+    // --- LÓGICA DA GESTÃO DIÁRIA ---
+    const inputGestaoData = document.getElementById('gestao-dia-data');
+    const btnGestaoHoje = document.getElementById('btn-gestao-hoje');
+    if (inputGestaoData) inputGestaoData.addEventListener('change', () => carregarGestaoDia());
+    if (btnGestaoHoje) {
+        btnGestaoHoje.addEventListener('click', () => {
+            if (inputGestaoData) inputGestaoData.value = window.obterHorarioPortugal().dataISO;
+            carregarGestaoDia();
+        });
+    }
+
+    // Seleção em lote
+    const checkTodos = document.getElementById('gd-check-todos');
+    if (checkTodos) {
+        checkTodos.addEventListener('change', (e) => {
+            document.querySelectorAll('.gd-check-item').forEach(item => item.checked = e.target.checked);
+            window.atualizarBarraEmLote();
+        });
+    }
+
+    const tabelaGestao = document.getElementById('tabela-gestao-dia');
+    if (tabelaGestao) {
+        tabelaGestao.addEventListener('change', (e) => {
+            if (e.target.classList.contains('gd-check-item')) window.atualizarBarraEmLote();
+        });
+    }
+
+    window.obterIdsSelecionados = function() {
+        return Array.from(document.querySelectorAll('.gd-check-item:checked')).map(cb => cb.value);
+    };
+
+    window.atualizarBarraEmLote = function() {
+        const selecionados = window.obterIdsSelecionados();
+        const barra = document.getElementById('gd-barra-em-lote');
+        const qtdEl = document.getElementById('gd-qtd-selecionados');
+        const checkTodosEl = document.getElementById('gd-check-todos');
+        if (qtdEl) qtdEl.textContent = selecionados.length;
+        if (selecionados.length > 0) {
+            if (barra) barra.classList.remove('hidden');
+        } else {
+            if (barra) barra.classList.add('hidden');
+            if (checkTodosEl) checkTodosEl.checked = false;
+        }
+    };
+
+    window.executarAcaoEmLote = async function(acao) {
+        const ids = window.obterIdsSelecionados();
+        if (ids.length === 0) { alert('Selecione pelo menos um funcionário.'); return; }
+        if (acao === 'ponto') { window.abrirModalPontoGestao(ids); return; }
+        const dataISO = document.getElementById('gestao-dia-data').value;
+        const rotulos = { 'folga': 'Dar Folga', 'falta': 'Marcar Falta', 'normal': 'Voltar Status Normal' };
+        if (!confirm(`Deseja aplicar "${rotulos[acao] || acao}" para ${ids.length} funcionário(s) em ${dataISO}?`)) return;
+
+        try {
+            for (const funcId of ids) { await window.definirStatusDiaSilencioso(funcId, dataISO, acao); }
+            alert('Status alterado com sucesso!'); carregarGestaoDia();
+        } catch (err) { alert('Erro ao alterar status.'); }
+    };
+
+    window.definirStatusDiaSilencioso = async function(funcId, dataISO, novoStatus) {
+        const { data: reg } = await window.bancoDeDados.from('registros_ponto').select('id').eq('funcionario_id', funcId).eq('data_registro', dataISO).maybeSingle();
+        if (reg) await window.bancoDeDados.from('registros_ponto').update({ status_dia: novoStatus }).eq('id', reg.id);
+        else await window.bancoDeDados.from('registros_ponto').insert([{ funcionario_id: funcId, data_registro: dataISO, status_dia: novoStatus, inserido_por_admin: true }]);
+    };
+
+    window.definirStatusDia = async function(funcId, dataISO, novoStatus) {
+        try { await window.definirStatusDiaSilencioso(funcId, dataISO, novoStatus); carregarGestaoDia(); }
+        catch (err) { alert('Erro ao alterar status.'); }
+    };
+
+    window.forcarClockOutGestao = async function(funcId, dataISO, horaSaidaStr) {
+        const timestamp = window.comporTimestampPortugal(dataISO, horaSaidaStr);
+        try {
+            const { data: reg } = await window.bancoDeDados.from('registros_ponto').select('id').eq('funcionario_id', funcId).eq('data_registro', dataISO).maybeSingle();
+            if (reg) await window.bancoDeDados.from('registros_ponto').update({ clock_out: timestamp, inserido_por_admin: true }).eq('id', reg.id);
+            carregarGestaoDia();
+        } catch (err) { alert('Erro ao forçar saída.'); }
+    };
+
+    window.abrirModalPontoGestao = function(funcIds) {
+        if (!Array.isArray(funcIds)) funcIds = [funcIds];
+        if (funcIds.length === 0) { alert('Selecione pelo menos um funcionário.'); return; }
+        const inputData = document.getElementById('gestao-dia-data');
+        const dataISO = inputData ? inputData.value : window.obterHorarioPortugal().dataISO;
+        document.getElementById('pg-func-ids').value = funcIds.join(',');
+
+        const [ano, mes, dia] = dataISO.split('-').map(Number);
+        const dateObj = new Date(ano, mes - 1, dia, 12, 0, 0);
+        const diaSemanaIndex = dateObj.getDay();
+
+        const subTitleEl = document.getElementById('pg-subtitulo');
+        const loteBoxEl = document.getElementById('pg-box-lote-opcao');
+        const entradaInput = document.getElementById('pg-hora-entrada');
+        const saidaInput = document.getElementById('pg-hora-saida');
+        const checkUsarPadrao = document.getElementById('pg-usar-padrao-individual');
+
+        if (funcIds.length === 1) {
+            const funcId = funcIds[0];
+            const func = (window.ultimoGestaoFuncionarios || []).find(f => f.id === funcId);
+            const reg = (window.ultimoGestaoRegistros || []).find(r => r.funcionario_id === funcId);
+            let nome = func ? func.nome_completo : 'Funcionário';
+            subTitleEl.textContent = `Ponto Individual: ${nome} (${String(dia).padStart(2,'0')}/${String(mes).padStart(2,'0')}/${ano})`;
+            if (loteBoxEl) loteBoxEl.classList.add('hidden');
+
+            let hIn = '08:00', hOut = '17:00';
+            if (diaSemanaIndex === 6) {
+                hIn = (func && func.horario_entrada_sabado) || '07:00';
+                hOut = (func && func.horario_saida_sabado) || '12:00';
+            } else {
+                hIn = (func && func.horario_entrada) || '08:00';
+                hOut = (func && func.horario_saida) || '17:00';
+            }
+
+            if (reg) {
+                if (reg.clock_in) { const ptIn = window.converterTimestampPortugal(reg.clock_in); if (ptIn) hIn = ptIn.horaFormatada; }
+                if (reg.clock_out) { const ptOut = window.converterTimestampPortugal(reg.clock_out); if (ptOut) hOut = ptOut.horaFormatada; }
+            }
+            entradaInput.disabled = false; saidaInput.disabled = false;
+            entradaInput.value = hIn; saidaInput.value = hOut;
+        } else {
+            subTitleEl.textContent = `Ponto em Lote: ${funcIds.length} funcionários selecionados (${String(dia).padStart(2,'0')}/${String(mes).padStart(2,'0')}/${ano})`;
+            if (loteBoxEl) loteBoxEl.classList.remove('hidden');
+            if (checkUsarPadrao) checkUsarPadrao.checked = true;
+            entradaInput.value = (diaSemanaIndex === 6) ? '07:00' : '08:00';
+            saidaInput.value = (diaSemanaIndex === 6) ? '12:00' : '17:00';
+            entradaInput.disabled = true; saidaInput.disabled = true;
+        }
+        document.getElementById('modal-ponto-gestao').classList.replace('hidden', 'flex');
+    };
+
+    const checkUsarPadraoEl = document.getElementById('pg-usar-padrao-individual');
+    if (checkUsarPadraoEl) {
+        checkUsarPadraoEl.addEventListener('change', (e) => {
+            const isChecked = e.target.checked;
+            document.getElementById('pg-hora-entrada').disabled = isChecked;
+            document.getElementById('pg-hora-saida').disabled = isChecked;
+        });
+    }
+
+    const formPontoGestao = document.getElementById('form-ponto-gestao');
+    if (formPontoGestao) {
+        formPontoGestao.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const idsStr = document.getElementById('pg-func-ids').value;
+            if (!idsStr) return;
+            const ids = idsStr.split(',').filter(Boolean);
+            const inputData = document.getElementById('gestao-dia-data');
+            const dataISO = inputData ? inputData.value : window.obterHorarioPortugal().dataISO;
+            const [ano, mes, dia] = dataISO.split('-').map(Number);
+            const dateObj = new Date(ano, mes - 1, dia, 12, 0, 0);
+            const diaSemanaIndex = dateObj.getDay();
+
+            const checkPadrao = document.getElementById('pg-usar-padrao-individual');
+            const usarPadrao = (ids.length > 1) && (checkPadrao ? checkPadrao.checked : false);
+            const horaEntradaGlobal = document.getElementById('pg-hora-entrada').value;
+            const horaSaidaGlobal = document.getElementById('pg-hora-saida').value;
+
+            try {
+                for (const funcId of ids) {
+                    const func = (window.ultimoGestaoFuncionarios || []).find(f => f.id === funcId);
+                    let hIn = horaEntradaGlobal;
+                    let hOut = horaSaidaGlobal;
+
+                    if (usarPadrao) {
+                        if (diaSemanaIndex === 6) {
+                            hIn = (func && func.horario_entrada_sabado) || '07:00';
+                            hOut = (func && func.horario_saida_sabado) || '12:00';
+                        } else {
+                            hIn = (func && func.horario_entrada) || '08:00';
+                            hOut = (func && func.horario_saida) || '17:00';
+                        }
+                    }
+
+                    const timestampIn = window.comporTimestampPortugal(dataISO, hIn);
+                    const timestampOut = window.comporTimestampPortugal(dataISO, hOut);
+
+                    const { data: reg } = await window.bancoDeDados.from('registros_ponto')
+                        .select('id').eq('funcionario_id', funcId).eq('data_registro', dataISO).maybeSingle();
+
+                    if (reg) {
+                        await window.bancoDeDados.from('registros_ponto').update({
+                            clock_in: timestampIn,
+                            clock_out: timestampOut,
+                            status_dia: 'normal',
+                            inserido_por_admin: true
+                        }).eq('id', reg.id);
+                    } else {
+                        await window.bancoDeDados.from('registros_ponto').insert([{
+                            funcionario_id: funcId,
+                            data_registro: dataISO,
+                            clock_in: timestampIn,
+                            clock_out: timestampOut,
+                            status_dia: 'normal',
+                            inserido_por_admin: true
+                        }]);
+                    }
+                }
+                alert('Ponto(s) confirmado(s) com sucesso!');
+                document.getElementById('modal-ponto-gestao').classList.replace('flex', 'hidden');
+                carregarGestaoDia();
+            } catch (err) {
+                console.error(err);
+                alert('Erro ao registrar ponto.');
+            }
+        });
+    }
+
+    function renderLinhaGestao(func, reg, diaSemanaIndex, ehHoje, ehPassado, hojePT) {
+        let horarioPrevisto = '', hSaidaOficial = '17:00';
+        if (diaSemanaIndex === 0) horarioPrevisto = 'Folga Semanal (Dom)';
+        else if (diaSemanaIndex === 6) {
+            const hE = func.horario_entrada_sabado || '07:00';
+            hSaidaOficial = func.horario_saida_sabado || '12:00';
+            horarioPrevisto = `${hE} às ${hSaidaOficial} (Sáb)`;
+        } else {
+            const hE = func.horario_entrada || '08:00';
+            hSaidaOficial = func.horario_saida || '17:00';
+            horarioPrevisto = `${hE} às ${hSaidaOficial}`;
+        }
+        let inTimeStr = '--:--', outTimeStr = '--:--', badgeStatus = '', tipoStat = '';
+        const stOriginal = reg ? reg.status_dia : 'normal';
+        const inPT = reg ? window.converterTimestampPortugal(reg.clock_in) : null;
+        const outPT = reg ? window.converterTimestampPortugal(reg.clock_out) : null;
+        if (inPT) inTimeStr = inPT.horaFormatada;
+        if (outPT) outTimeStr = outPT.horaFormatada;
+
+        if (stOriginal === 'folga') { badgeStatus = '<span class="bg-blue-100 text-blue-800 font-bold px-3 py-1 rounded-full text-xs">😴 De Folga</span>'; tipoStat = 'folga'; }
+        else if (stOriginal === 'falta') { badgeStatus = '<span class="bg-red-100 text-red-800 font-bold px-3 py-1 rounded-full text-xs">❌ Falta</span>'; tipoStat = 'falta'; }
+        else if (reg && reg.clock_in && reg.clock_out) { badgeStatus = '<span class="bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded-full text-xs">🟢 Presente</span>'; tipoStat = 'presente'; }
+        else if (reg && reg.clock_in && !reg.clock_out) {
+            const [sH, sM] = hSaidaOficial.split(':').map(Number);
+            if (ehPassado || (ehHoje && hojePT.minutosDoDia > sH * 60 + sM + 20)) {
+                badgeStatus = '<span class="bg-amber-100 text-amber-800 font-bold px-3 py-1 rounded-full text-xs">⚠️ Esqueceram Out</span>'; tipoStat = 'esqueceu';
+            } else { badgeStatus = '<span class="bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded-full text-xs">🟢 Trabalhando</span>'; tipoStat = 'presente'; }
+        } else {
+            if (diaSemanaIndex === 0) { badgeStatus = '<span class="bg-blue-50 text-blue-600 font-bold px-3 py-1 rounded-full text-xs">😴 Folga Dom</span>'; tipoStat = 'folga'; }
+            else if (ehPassado || ehHoje) { badgeStatus = '<span class="bg-red-100 text-red-800 font-bold px-3 py-1 rounded-full text-xs">❌ Não Foi Trabalhar</span>'; tipoStat = 'falta'; }
+            else { badgeStatus = '<span class="bg-slate-100 text-slate-600 font-bold px-3 py-1 rounded-full text-xs">⏳ Aguardando</span>'; }
+        }
+        return { horarioPrevisto, hSaidaOficial, inTimeStr, outTimeStr, badgeStatus, stOriginal, tipoStat };
+    }
+
+    async function carregarGestaoDia() {
+        const inputData = document.getElementById('gestao-dia-data');
+        if (!inputData) return;
+        if (!inputData.value) inputData.value = window.obterHorarioPortugal().dataISO;
+        const dataISO = inputData.value;
+        const [ano, mes, dia] = dataISO.split('-').map(Number);
+        const dateObj = new Date(ano, mes - 1, dia, 12, 0, 0);
+        const diaSemanaIndex = dateObj.getDay();
+        const diasSemanaNome = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+        
+        const tagDia = document.getElementById('gd-dia-semana-tag');
+        if (tagDia) tagDia.textContent = `${diasSemanaNome[diaSemanaIndex]} (${String(dia).padStart(2,'0')}/${String(mes).padStart(2,'0')}/${ano})`;
+
+        const tbody = document.getElementById('tabela-gestao-dia');
+        if (!tbody) return;
+        tbody.innerHTML = '<tr><td colspan="7" class="p-8 text-center text-slate-500 font-medium">Buscando dados...</td></tr>';
+
+        const checkTodosEl = document.getElementById('gd-check-todos');
+        if (checkTodosEl) checkTodosEl.checked = false;
+        window.atualizarBarraEmLote();
+
+        try {
+            const { data: funcionarios } = await window.bancoDeDados.from('funcionarios').select('*').eq('status', true).order('nome_completo');
+            const { data: registros } = await window.bancoDeDados.from('registros_ponto').select('*').eq('data_registro', dataISO);
+
+            window.ultimoGestaoFuncionarios = funcionarios || [];
+            window.ultimoGestaoRegistros = registros || [];
+
+            let totalPresentes = 0, totalFaltas = 0, totalFolgas = 0, totalEsqueceuOut = 0;
+            const hojePT = window.obterHorarioPortugal();
+            const ehHoje = (dataISO === hojePT.dataISO);
+            const ehPassado = (dataISO < hojePT.dataISO);
+
+            tbody.innerHTML = '';
+            (funcionarios || []).forEach(func => {
+                const reg = (registros || []).find(r => r.funcionario_id === func.id);
+                const info = renderLinhaGestao(func, reg, diaSemanaIndex, ehHoje, ehPassado, hojePT);
+
+                if (info.tipoStat === 'presente') totalPresentes++;
+                else if (info.tipoStat === 'falta') totalFaltas++;
+                else if (info.tipoStat === 'folga') totalFolgas++;
+                else if (info.tipoStat === 'esqueceu') totalEsqueceuOut++;
+
+                let btns = `<div class="flex items-center justify-center gap-1 flex-wrap">`;
+                btns += info.stOriginal === 'folga' ? `<button onclick="definirStatusDia('${func.id}','${dataISO}','normal')" class="text-xs bg-slate-200 text-slate-700 font-bold px-2 py-1 rounded">Normal</button>` : `<button onclick="definirStatusDia('${func.id}','${dataISO}','folga')" class="text-xs bg-blue-600 text-white font-bold px-2 py-1 rounded">😴 Folga</button>`;
+                btns += info.stOriginal === 'falta' ? `<button onclick="definirStatusDia('${func.id}','${dataISO}','normal')" class="text-xs bg-slate-200 text-slate-700 font-bold px-2 py-1 rounded">Normal</button>` : `<button onclick="definirStatusDia('${func.id}','${dataISO}','falta')" class="text-xs bg-red-600 text-white font-bold px-2 py-1 rounded">❌ Falta</button>`;
+                if (reg && reg.clock_in && !reg.clock_out) btns += `<button onclick="forcarClockOutGestao('${func.id}','${dataISO}','${info.hSaidaOficial}')" class="text-xs bg-purple-600 text-white font-bold px-2 py-1 rounded">⚡ Out</button>`;
+                btns += `<button onclick="abrirModalPontoGestao(['${func.id}'])" class="text-xs bg-slate-800 text-white font-bold px-2 py-1 rounded">✏️ Ponto</button></div>`;
+
+                const foto = func.foto_url || 'https://via.placeholder.com/150';
+                tbody.innerHTML += `<tr class="border-b border-slate-100 hover:bg-slate-50"><td class="p-3 sm:p-4 text-center"><input type="checkbox" class="gd-check-item w-4 h-4 rounded border-slate-300 text-orange-500 focus:ring-orange-500 cursor-pointer" value="${func.id}"></td><td class="p-3 sm:p-4 flex items-center gap-3"><img src="${foto}" class="w-8 h-8 rounded-full object-cover"><div><p class="font-bold text-slate-800 text-sm">${func.nome_completo}</p></div></td><td class="p-3 sm:p-4 text-center text-xs text-slate-600">${info.horarioPrevisto}</td><td class="p-3 sm:p-4 text-center text-xs font-bold text-emerald-600 font-mono">${info.inTimeStr}</td><td class="p-3 sm:p-4 text-center text-xs font-bold text-orange-600 font-mono">${info.outTimeStr}</td><td class="p-3 sm:p-4 text-center">${info.badgeStatus}</td><td class="p-3 sm:p-4 text-center">${btns}</td></tr>`;
+            });
+
+            document.getElementById('gd-presentes').textContent = totalPresentes;
+            document.getElementById('gd-faltas').textContent = totalFaltas;
+            document.getElementById('gd-folgas').textContent = totalFolgas;
+            document.getElementById('gd-esqueceu-out').textContent = totalEsqueceuOut;
+        } catch (err) {
+            tbody.innerHTML = '<tr><td colspan="7" class="p-8 text-center text-red-500 font-bold">Erro ao carregar dados.</td></tr>';
+        }
+    }
+
     let fotoBase64Temporaria = null; 
     async function carregarTabelaFuncionarios() {
         const tbody = document.getElementById('tabela-funcionarios');
@@ -248,6 +556,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('func-role').value = func.role;
         document.getElementById('func-entrada').value = func.horario_entrada || '08:00';
         document.getElementById('func-saida').value = func.horario_saida || '17:00';
+        document.getElementById('func-entrada-sabado').value = func.horario_entrada_sabado || '07:00';
+        document.getElementById('func-saida-sabado').value = func.horario_saida_sabado || '12:00';
         document.getElementById('func-almoco-inicio').value = func.horario_almoco_inicio || '13:00';
         document.getElementById('func-almoco-fim').value = func.horario_almoco_fim || '14:00';
         fotoBase64Temporaria = func.foto_url || null;
@@ -268,6 +578,8 @@ document.addEventListener('DOMContentLoaded', () => {
             role: document.getElementById('func-role').value,
             horario_entrada: document.getElementById('func-entrada').value, 
             horario_saida: document.getElementById('func-saida').value,
+            horario_entrada_sabado: document.getElementById('func-entrada-sabado').value || '07:00',
+            horario_saida_sabado: document.getElementById('func-saida-sabado').value || '12:00',
             horario_almoco_inicio: document.getElementById('func-almoco-inicio').value || '13:00',
             horario_almoco_fim: document.getElementById('func-almoco-fim').value || '14:00',
             status: true
@@ -396,12 +708,81 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     }
 
+    function calcularDadosDia(d, ano, mes, func, reg, hojePT) {
+        const dataISO = `${ano}-${mes}-${String(d).padStart(2, '0')}`;
+        const dateObj = new Date(Number(ano), Number(mes) - 1, d, 12, 0, 0);
+        const diaSemana = dateObj.getDay();
+
+        let hEntradaOficial = func.horario_entrada || '08:00';
+        let hSaidaOficial = func.horario_saida || '17:00';
+        let descAlmoco = true;
+
+        if (diaSemana === 6) {
+            hEntradaOficial = func.horario_entrada_sabado || '07:00';
+            hSaidaOficial = func.horario_saida_sabado || '12:00';
+            descAlmoco = false;
+        }
+
+        let inTimeStr = '--:--', outTimeStr = '--:--', atrasoMin = 0, extraMin = 0, trabMin = 0, statusStr = 'Vazio';
+        const stOriginal = reg ? reg.status_dia : 'normal';
+
+        if (stOriginal === 'folga') {
+            statusStr = 'De Folga';
+        } else if (stOriginal === 'falta') {
+            statusStr = 'Falta';
+        } else if (reg && reg.clock_in) {
+            const inPT = window.converterTimestampPortugal(reg.clock_in);
+            const outPT = reg.clock_out ? window.converterTimestampPortugal(reg.clock_out) : null;
+            if (inPT) {
+                inTimeStr = inPT.horaFormatada;
+                const [hE, mE] = hEntradaOficial.split(':').map(Number);
+                const diffE = inPT.minutosDoDia - (hE * 60 + mE);
+                if (diffE > 20) atrasoMin = diffE;
+            }
+            if (outPT) {
+                outTimeStr = outPT.horaFormatada;
+                const [hS, mS] = hSaidaOficial.split(':').map(Number);
+                const diffS = outPT.minutosDoDia - (hS * 60 + mS);
+                if (diffS > 20) extraMin = diffS;
+                if (inPT) {
+                    const totalMin = (new Date(reg.clock_out) - new Date(reg.clock_in)) / 60000;
+                    let almoco = 0;
+                    if (descAlmoco) {
+                        const [aIH, aIM] = (func.horario_almoco_inicio || '13:00').split(':').map(Number);
+                        const [aFH, aFM] = (func.horario_almoco_fim || '14:00').split(':').map(Number);
+                        almoco = Math.max(0, (aFH * 60 + aFM) - (aIH * 60 + aIM));
+                    }
+                    trabMin = Math.max(0, totalMin - almoco);
+                }
+                statusStr = 'Completo';
+            } else {
+                const [sH, sM] = hSaidaOficial.split(':').map(Number);
+                const ehHoje = (dataISO === hojePT.dataISO);
+                const ehPassado = (dataISO < hojePT.dataISO);
+                if (ehPassado || (ehHoje && hojePT.minutosDoDia > sH * 60 + sM + 20)) {
+                    statusStr = 'Esqueceu Clock Out';
+                } else {
+                    statusStr = 'Trabalhando';
+                }
+            }
+        } else {
+            if (diaSemana === 0) statusStr = 'Folga Domingo';
+            else {
+                const ehHoje = (dataISO === hojePT.dataISO);
+                const ehPassado = (dataISO < hojePT.dataISO);
+                if (ehPassado || ehHoje) statusStr = 'Falta';
+                else statusStr = 'Aguardando';
+            }
+        }
+
+        return { dataISO, inTimeStr, outTimeStr, atrasoMin, extraMin, trabMin, statusStr };
+    }
+
     window.abrirRelatorioTela = async function(idFuncionario, nomeFuncionario) {
         const mesAno = document.getElementById('ponto-mes-ano').value;
         if (!mesAno) return alert('Selecione um mês!');
         const [ano, mes] = mesAno.split('-');
         const primeiroDiaStr = `${ano}-${mes}-01`;
-        // Último dia do mês (usa 0 como dia = último dia do mês anterior ao informado).
         const ultimoDiaNumero = new Date(Number(ano), Number(mes), 0).getDate();
         const ultimoDiaStr = `${ano}-${mes}-${String(ultimoDiaNumero).padStart(2, '0')}`;
 
@@ -412,54 +793,34 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('modal-ver-relatorio').classList.replace('hidden', 'flex');
 
         try {
-            const { data: funcDados } = await window.bancoDeDados.from('funcionarios').select('horario_entrada, horario_saida, horario_almoco_inicio, horario_almoco_fim').eq('id', idFuncionario).single();
+            const { data: funcDados } = await window.bancoDeDados.from('funcionarios').select('*').eq('id', idFuncionario).single();
             const { data: registros } = await window.bancoDeDados.from('registros_ponto').select('*').eq('funcionario_id', idFuncionario).gte('data_registro', primeiroDiaStr).lte('data_registro', ultimoDiaStr);
 
-            function minFromHHMM(v, dflt) { const t = v || dflt; const [h, m] = t.split(':').map(Number); return h * 60 + m; }
-            const minAlmoco = Math.max(0, minFromHHMM(funcDados.horario_almoco_fim, '14:00') - minFromHHMM(funcDados.horario_almoco_inicio, '13:00'));
-
-            document.getElementById('relatorio-tela-mes').textContent = `Período: ${mesAno} | Horário: ${funcDados.horario_entrada || '08:00'}-${funcDados.horario_saida || '17:00'} | Almoço: ${funcDados.horario_almoco_inicio || '13:00'}-${funcDados.horario_almoco_fim || '14:00'}`;
+            document.getElementById('relatorio-tela-mes').textContent = `Período: ${mesAno} | Seg-Sex: ${funcDados.horario_entrada || '08:00'}-${funcDados.horario_saida || '17:00'} | Sáb: ${funcDados.horario_entrada_sabado || '07:00'}-${funcDados.horario_saida_sabado || '12:00'}`;
             tbody.innerHTML = '';
             let totalAtraso = 0, totalExtra = 0, totalTrabalhado = 0;
+            const hojePT = window.obterHorarioPortugal();
 
             for (let d = 1; d <= ultimoDiaNumero; d++) {
-                const dataISO = `${ano}-${mes}-${String(d).padStart(2, '0')}`;
                 const dataBR = `${String(d).padStart(2, '0')}/${mes}`;
+                const dataISO = `${ano}-${mes}-${String(d).padStart(2, '0')}`;
                 const reg = (registros || []).find(r => r.data_registro === dataISO);
                 
-                let inTime = '--:--', outTime = '--:--', atraso = 0, extra = 0, trabalhado = 0;
-                let status = '<span class="bg-slate-100 text-slate-500 px-2 py-1 rounded text-[10px] sm:text-xs">Vazio</span>';
+                const dDia = calcularDadosDia(d, ano, mes, funcDados, reg, hojePT);
 
-                if (reg) {
-                    // Conversão das horas para o fuso de Portugal (ignora o fuso do dispositivo).
-                    const inPT = window.converterTimestampPortugal(reg.clock_in);
-                    const outPT = window.converterTimestampPortugal(reg.clock_out);
-                    if (inPT) {
-                        inTime = inPT.horaFormatada;
-                        const [hE, mE] = (funcDados.horario_entrada || '08:00').split(':').map(Number);
-                        const diff = inPT.minutosDoDia - (hE * 60 + mE);
-                        // Atraso só conta acima de 20 min de tolerância.
-                        if (diff > 20) atraso = diff;
-                    }
-                    if (outPT) {
-                        outTime = outPT.horaFormatada;
-                        const [hS, mS] = (funcDados.horario_saida || '17:00').split(':').map(Number);
-                        const diff = outPT.minutosDoDia - (hS * 60 + mS);
-                        // Hora extra só conta acima de 20 min de tolerância.
-                        if (diff > 20) extra = diff;
-                        if (inPT) {
-                            // Tempo trabalhado descontando o almoço (em minutos, independente de fuso).
-                            const totalMin = (new Date(reg.clock_out) - new Date(reg.clock_in)) / 60000;
-                            trabalhado = Math.max(0, totalMin - minAlmoco);
-                        }
-                    }
-                    status = reg.clock_in && reg.clock_out ? '<span class="text-emerald-600 font-bold">✅</span>' : '🔄';
-                }
-                totalAtraso += atraso; totalExtra += extra; totalTrabalhado += trabalhado;
-                
-                // Só exibe linhas que têm algum registro para não poluir
-                if (reg) {
-                    tbody.innerHTML += `<tr class="border-b border-slate-100 hover:bg-slate-50"><td class="p-3 sm:p-4 font-medium text-slate-600">${dataBR}</td><td class="p-3 sm:p-4 text-center font-mono">${inTime}</td><td class="p-3 sm:p-4 text-center font-mono">${outTime}</td><td class="p-3 sm:p-4 text-center text-red-600 font-bold">${atraso > 0 ? atraso + 'm' : '--'}</td><td class="p-3 sm:p-4 text-center text-blue-600 font-bold">${extra > 0 ? extra + 'm' : '--'}</td><td class="p-3 sm:p-4 text-center">${status}</td></tr>`;
+                totalAtraso += dDia.atrasoMin;
+                totalExtra += dDia.extraMin;
+                totalTrabalhado += dDia.trabMin;
+
+                let statusBadge = '<span class="text-slate-400">-</span>';
+                if (dDia.statusStr === 'Completo') statusBadge = '<span class="text-emerald-600 font-bold">✅ Ok</span>';
+                else if (dDia.statusStr === 'De Folga') statusBadge = '<span class="text-blue-600 font-bold">😴 Folga</span>';
+                else if (dDia.statusStr === 'Falta') statusBadge = '<span class="text-red-600 font-bold">❌ Falta</span>';
+                else if (dDia.statusStr === 'Esqueceu Clock Out') statusBadge = '<span class="text-amber-600 font-bold">⚠️ Sem Out</span>';
+                else if (dDia.statusStr === 'Trabalhando') statusBadge = '<span class="text-emerald-500 font-bold">🟢 Trab</span>';
+
+                if (reg || dDia.statusStr === 'Falta' || dDia.statusStr === 'De Folga') {
+                    tbody.innerHTML += `<tr class="border-b border-slate-100 hover:bg-slate-50"><td class="p-3 sm:p-4 font-medium text-slate-600">${dataBR}</td><td class="p-3 sm:p-4 text-center font-mono">${dDia.inTimeStr}</td><td class="p-3 sm:p-4 text-center font-mono">${dDia.outTimeStr}</td><td class="p-3 sm:p-4 text-center text-red-600 font-bold">${dDia.atrasoMin > 0 ? dDia.atrasoMin + 'm' : '--'}</td><td class="p-3 sm:p-4 text-center text-blue-600 font-bold">${dDia.extraMin > 0 ? dDia.extraMin + 'm' : '--'}</td><td class="p-3 sm:p-4 text-center">${statusBadge}</td></tr>`;
                 }
             }
             if (tbody.innerHTML === '') tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-slate-500">Sem registros.</td></tr>';
@@ -484,56 +845,28 @@ document.addEventListener('DOMContentLoaded', () => {
         const ultimoDiaStr = `${ano}-${mes}-${String(ultimoDiaNumero).padStart(2, '0')}`;
 
         try {
-            const { data: funcDados } = await window.bancoDeDados.from('funcionarios').select('horario_entrada, horario_saida, horario_almoco_inicio, horario_almoco_fim').eq('id', idFuncionario).single();
+            const { data: funcDados } = await window.bancoDeDados.from('funcionarios').select('*').eq('id', idFuncionario).single();
             const { data: registros } = await window.bancoDeDados.from('registros_ponto').select('*').eq('funcionario_id', idFuncionario).gte('data_registro', primeiroDiaStr).lte('data_registro', ultimoDiaStr);
-
-            // Duração do intervalo de almoço (em minutos)
-            function minFromHHMM(v, dflt) { const t = v || dflt; const [h, m] = t.split(':').map(Number); return h * 60 + m; }
-            const minAlmoco = Math.max(0, minFromHHMM(funcDados.horario_almoco_fim, '14:00') - minFromHHMM(funcDados.horario_almoco_inicio, '13:00'));
 
             let csv = '\uFEFF'; 
             csv += `RELATÓRIO DE PONTO;${nomeFuncionario}\nMês Referência;${mesAno}\n`;
-            csv += `Horário de Trabalho;${funcDados.horario_entrada || '08:00'} às ${funcDados.horario_saida || '17:00'}\n`;
-            csv += `Almoço;${funcDados.horario_almoco_inicio || '13:00'} às ${funcDados.horario_almoco_fim || '14:00'} (${minAlmoco}min)\n\n`;
+            csv += `Horário Seg-Sex;${funcDados.horario_entrada || '08:00'} às ${funcDados.horario_saida || '17:00'}\n`;
+            csv += `Horário Sábado;${funcDados.horario_entrada_sabado || '07:00'} às ${funcDados.horario_saida_sabado || '12:00'}\n\n`;
             csv += `Data;Entrada;Saída;Atraso;Hora Extra;Trabalhado;Status\n`;
 
             let totalAtraso = 0, totalExtra = 0, totalTrabalhado = 0;
+            const hojePT = window.obterHorarioPortugal();
 
             for (let d = 1; d <= ultimoDiaNumero; d++) {
-                const dataISO = `${ano}-${mes}-${String(d).padStart(2, '0')}`;
                 const dataBR = `${String(d).padStart(2, '0')}/${mes}/${ano}`;
-                const reg = (registros || []).find(r => r.data_registro === dataISO);
+                const reg = (registros || []).find(r => r.data_registro === `${ano}-${mes}-${String(d).padStart(2, '0')}`);
+                const dDia = calcularDadosDia(d, ano, mes, funcDados, reg, hojePT);
 
-                let inT = '--:--', outT = '--:--', atrs = 0, extr = 0, trab = 0, st = 'Falta';
+                totalAtraso += dDia.atrasoMin;
+                totalExtra += dDia.extraMin;
+                totalTrabalhado += dDia.trabMin;
 
-                if (reg) {
-                    // Conversão das horas para o fuso de Portugal (ignora o fuso do dispositivo).
-                    const inPT = window.converterTimestampPortugal(reg.clock_in);
-                    const outPT = window.converterTimestampPortugal(reg.clock_out);
-                    if (inPT) {
-                        inT = inPT.horaFormatada;
-                        const [hE, mE] = (funcDados.horario_entrada || '08:00').split(':').map(Number);
-                        const diff = inPT.minutosDoDia - (hE * 60 + mE);
-                        // Atraso só conta acima de 20 min de tolerância.
-                        if (diff > 20) atrs = diff;
-                    }
-                    if (outPT) {
-                        outT = outPT.horaFormatada;
-                        const [hS, mS] = (funcDados.horario_saida || '17:00').split(':').map(Number);
-                        const diff = outPT.minutosDoDia - (hS * 60 + mS);
-                        // Hora extra só conta acima de 20 min de tolerância.
-                        if (diff > 20) extr = diff;
-                        if (inPT) {
-                            // Tempo trabalhado descontando o almoço (em minutos, independente de fuso).
-                            const totalMin = (new Date(reg.clock_out) - new Date(reg.clock_in)) / 60000;
-                            trab = Math.max(0, totalMin - minAlmoco);
-                        }
-                    }
-                    st = (reg.clock_in && reg.clock_out) ? 'Completo' : 'Trabalhando';
-                    totalAtraso += atrs; totalExtra += extr; totalTrabalhado += trab;
-                }
-                // "=" previne erros de data no Excel
-                csv += `="${dataBR}";${inT};${outT};${formatarHoraMinSeg(atrs)};${formatarHoraMinSeg(extr)};${formatarHoraMinSeg(trab)};${st}\n`;
+                csv += `="${dataBR}";${dDia.inTimeStr};${dDia.outTimeStr};${formatarHoraMinSeg(dDia.atrasoMin)};${formatarHoraMinSeg(dDia.extraMin)};${formatarHoraMinSeg(dDia.trabMin)};${dDia.statusStr}\n`;
             }
 
             csv += `\nRESUMO\n`;
@@ -572,24 +905,23 @@ document.addEventListener('DOMContentLoaded', () => {
         if (btn) { btn.disabled = true; btn.innerHTML = '<span>⏳</span> Gerando...'; }
 
         try {
-            const { data: funcionarios } = await window.bancoDeDados.from('funcionarios').select('id, nome_completo, horario_entrada, horario_saida, horario_almoco_inicio, horario_almoco_fim').order('nome_completo');
+            const { data: funcionarios } = await window.bancoDeDados.from('funcionarios').select('*').order('nome_completo');
             const { data: registros } = await window.bancoDeDados.from('registros_ponto').select('*').gte('data_registro', primeiroDiaStr).lte('data_registro', ultimoDiaStr);
             if (!funcionarios || funcionarios.length === 0) { alert('Nenhum funcionário encontrado.'); return; }
 
             const wb = XLSX.utils.book_new();
-            const resumoGeral = [['Funcionário', 'Horário', 'Atrasos', 'Horas Extras', 'Trabalhado']];
-            function minFromHHMM(v, dflt) { const t = v || dflt; const [h, m] = t.split(':').map(Number); return h * 60 + m; }
-            // Acumuladores para o TOTAL GERAL do mês (soma de todos os funcionários).
+            const resumoGeral = [['Funcionário', 'Horário Seg-Sex', 'Horário Sáb', 'Atrasos', 'Horas Extras', 'Trabalhado']];
             let geralAtraso = 0, geralExtra = 0, geralTrabalhado = 0;
+            const hojePT = window.obterHorarioPortugal();
 
             funcionarios.forEach(func => {
-                const minAlmoco = Math.max(0, minFromHHMM(func.horario_almoco_fim, '14:00') - minFromHHMM(func.horario_almoco_inicio, '13:00'));
-                const horarioStr = `${func.horario_entrada || '08:00'}-${func.horario_saida || '17:00'}`;
+                const horarioSegSex = `${func.horario_entrada || '08:00'}-${func.horario_saida || '17:00'}`;
+                const horarioSab = `${func.horario_entrada_sabado || '07:00'}-${func.horario_saida_sabado || '12:00'}`;
                 const dados = [
                     [`RELATÓRIO DE PONTO - ${func.nome_completo}`],
                     [`Mês Referência: ${mesAno}`],
-                    [`Horário de Trabalho: ${func.horario_entrada || '08:00'} às ${func.horario_saida || '17:00'}`],
-                    [`Almoço: ${func.horario_almoco_inicio || '13:00'} às ${func.horario_almoco_fim || '14:00'} (${minAlmoco}min)`],
+                    [`Horário Seg-Sex: ${func.horario_entrada || '08:00'} às ${func.horario_saida || '17:00'}`],
+                    [`Horário Sábado: ${func.horario_entrada_sabado || '07:00'} às ${func.horario_saida_sabado || '12:00'}`],
                     [],
                     ['Data', 'Entrada', 'Saída', 'Atraso', 'Hora Extra', 'Trabalhado', 'Status']
                 ];
@@ -598,37 +930,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     const dataISO = `${ano}-${mes}-${String(d).padStart(2, '0')}`;
                     const dataBR = `${String(d).padStart(2, '0')}/${mes}/${ano}`;
                     const reg = (registros || []).find(r => r.funcionario_id === func.id && r.data_registro === dataISO);
-                    let inT = '--:--', outT = '--:--', atrs = 0, extr = 0, trab = 0, st = 'Falta';
-                    if (reg) {
-                        const inPT = window.converterTimestampPortugal(reg.clock_in);
-                        const outPT = window.converterTimestampPortugal(reg.clock_out);
-                        if (inPT) {
-                            inT = inPT.horaFormatada;
-                            const [hE, mE] = (func.horario_entrada || '08:00').split(':').map(Number);
-                            const diff = inPT.minutosDoDia - (hE * 60 + mE);
-                            if (diff > 20) atrs = diff;
-                        }
-                        if (outPT) {
-                            outT = outPT.horaFormatada;
-                            const [hS, mS] = (func.horario_saida || '17:00').split(':').map(Number);
-                            const diff = outPT.minutosDoDia - (hS * 60 + mS);
-                            if (diff > 20) extr = diff;
-                            if (inPT) {
-                                const totalMin = (new Date(reg.clock_out) - new Date(reg.clock_in)) / 60000;
-                                trab = Math.max(0, totalMin - minAlmoco);
-                            }
-                        }
-                        st = (reg.clock_in && reg.clock_out) ? 'Completo' : 'Trabalhando';
-                        totalAtraso += atrs; totalExtra += extr; totalTrabalhado += trab;
-                    }
-                    dados.push([dataBR, inT, outT, formatarHoraMinSeg(atrs), formatarHoraMinSeg(extr), formatarHoraMinSeg(trab), st]);
+                    
+                    const dDia = calcularDadosDia(d, ano, mes, func, reg, hojePT);
+
+                    totalAtraso += dDia.atrasoMin;
+                    totalExtra += dDia.extraMin;
+                    totalTrabalhado += dDia.trabMin;
+
+                    dados.push([dataBR, dDia.inTimeStr, dDia.outTimeStr, formatarHoraMinSeg(dDia.atrasoMin), formatarHoraMinSeg(dDia.extraMin), formatarHoraMinSeg(dDia.trabMin), dDia.statusStr]);
                 }
                 dados.push([]);
                 dados.push(['RESUMO']);
                 dados.push(['Total Atrasos:', formatarHoraMinSeg(totalAtraso)]);
                 dados.push(['Total Horas Extras:', formatarHoraMinSeg(totalExtra)]);
                 dados.push(['Total Trabalhado:', formatarHoraMinSeg(totalTrabalhado)]);
-                // Soma para o TOTAL GERAL do mês (todas as horas somadas).
                 geralAtraso += totalAtraso; geralExtra += totalExtra; geralTrabalhado += totalTrabalhado;
 
                 let nomeAba = func.nome_completo.substring(0, 28).replace(/[\\\/\?\*\[\]:]/g, '');
@@ -637,12 +952,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 while (wb.SheetNames.includes(nomeAba + sufixo)) { sufixo = '_' + n; n++; }
                 const ws = XLSX.utils.aoa_to_sheet(dados);
                 XLSX.utils.book_append_sheet(wb, ws, nomeAba + sufixo);
-                resumoGeral.push([func.nome_completo, horarioStr, formatarHoraMinSeg(totalAtraso), formatarHoraMinSeg(totalExtra), formatarHoraMinSeg(totalTrabalhado)]);
+                resumoGeral.push([func.nome_completo, horarioSegSex, horarioSab, formatarHoraMinSeg(totalAtraso), formatarHoraMinSeg(totalExtra), formatarHoraMinSeg(totalTrabalhado)]);
             });
 
             // Totalização do mês inteiro: soma as horas de TODOS os funcionários.
             resumoGeral.push([]);
-            resumoGeral.push(['TOTAL GERAL', '', formatarHoraMinSeg(geralAtraso), formatarHoraMinSeg(geralExtra), formatarHoraMinSeg(geralTrabalhado)]);
+            resumoGeral.push(['TOTAL GERAL', '', '', formatarHoraMinSeg(geralAtraso), formatarHoraMinSeg(geralExtra), formatarHoraMinSeg(geralTrabalhado)]);
 
             const wsResumo = XLSX.utils.aoa_to_sheet(resumoGeral);
             XLSX.utils.book_append_sheet(wb, wsResumo, 'Resumo Geral');

@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS public.funcionarios (
     status                BOOLEAN NOT NULL DEFAULT TRUE,
     horario_entrada       TIME NOT NULL DEFAULT '08:00',
     horario_saida         TIME NOT NULL DEFAULT '17:00',
+    horario_entrada_sabado TIME DEFAULT '07:00',
+    horario_saida_sabado   TIME DEFAULT '12:00',
     horario_almoco_inicio TIME DEFAULT '13:00',
     horario_almoco_fim    TIME DEFAULT '14:00',
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -31,6 +33,9 @@ CREATE TABLE IF NOT EXISTS public.funcionarios (
 
 ALTER TABLE public.funcionarios ADD COLUMN IF NOT EXISTS horario_almoco_inicio TIME DEFAULT '13:00';
 ALTER TABLE public.funcionarios ADD COLUMN IF NOT EXISTS horario_almoco_fim    TIME DEFAULT '14:00';
+ALTER TABLE public.funcionarios ADD COLUMN IF NOT EXISTS horario_entrada_sabado TIME DEFAULT '07:00';
+ALTER TABLE public.funcionarios ADD COLUMN IF NOT EXISTS horario_saida_sabado   TIME DEFAULT '12:00';
+ALTER TABLE public.funcionarios ADD COLUMN IF NOT EXISTS whatsapp TEXT;
 ALTER TABLE public.funcionarios ADD COLUMN IF NOT EXISTS whatsapp TEXT;
 ALTER TABLE public.funcionarios ADD COLUMN IF NOT EXISTS cargo TEXT DEFAULT 'Funcionário';
 ALTER TABLE public.funcionarios ADD COLUMN IF NOT EXISTS horario_entrada TIME NOT NULL DEFAULT '08:00';
@@ -46,11 +51,15 @@ CREATE TABLE IF NOT EXISTS public.registros_ponto (
     data_registro       DATE NOT NULL,
     clock_in            TIMESTAMPTZ,
     clock_out           TIMESTAMPTZ,
+    status_dia          TEXT DEFAULT 'normal',
+    observacao          TEXT,
     inserido_por_admin  BOOLEAN DEFAULT FALSE,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (funcionario_id, data_registro)
 );
 ALTER TABLE public.registros_ponto ADD COLUMN IF NOT EXISTS inserido_por_admin BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.registros_ponto ADD COLUMN IF NOT EXISTS status_dia TEXT DEFAULT 'normal';
+ALTER TABLE public.registros_ponto ADD COLUMN IF NOT EXISTS observacao TEXT;
 ALTER TABLE public.registros_ponto ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
 -- ---------------------------------------------------------------------

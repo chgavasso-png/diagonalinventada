@@ -78,26 +78,32 @@ window.fazerLogout = function() {
 
 async function registrarPonto(tipo, funcionarioId) {
     try {
-        const { data: funcDados, error: errFunc } = await window.bancoDeDados.from('funcionarios').select('horario_entrada, horario_saida').eq('id', funcionarioId).single();
+        const { data: funcDados, error: errFunc } = await window.bancoDeDados.from('funcionarios').select('horario_entrada, horario_saida, horario_entrada_sabado, horario_saida_sabado').eq('id', funcionarioId).single();
         if (errFunc) throw new Error('Erro ao buscar regras de horário.');
 
         // Horário fixo de Portugal (Figueira da Foz - Europe/Lisbon), não do dispositivo.
         const agora = window.obterHorarioPortugal();
         const horaAtualMinutos = agora.minutosDoDia;
 
-        if (tipo === 'entrada' && funcDados.horario_entrada) {
-            const [hEntrada, mEntrada] = funcDados.horario_entrada.split(':').map(Number);
+        const dateHoje = new Date(`${agora.dataISO}T12:00:00`);
+        const isSabado = dateHoje.getDay() === 6;
+
+        const hEntradaDef = isSabado ? (funcDados.horario_entrada_sabado || '07:00') : (funcDados.horario_entrada || '08:00');
+        const hSaidaDef = isSabado ? (funcDados.horario_saida_sabado || '12:00') : (funcDados.horario_saida || '17:00');
+
+        if (tipo === 'entrada' && hEntradaDef) {
+            const [hEntrada, mEntrada] = hEntradaDef.split(':').map(Number);
             const minEntradaOficial = (hEntrada * 60) + mEntrada;
             let diff = horaAtualMinutos - minEntradaOficial;
             if (diff < -720) diff += 1440; if (diff > 720) diff -= 1440;
 
             if (diff < -20 || diff > 20) {
-                mostrarMensagem(`⏰ Fora do horário! Seu Clock In é às ${funcDados.horario_entrada}. Você só pode registrar 20 minutos antes ou depois.`, 'erro');
+                mostrarMensagem(`⏰ Fora do horário! Seu Clock In é às ${hEntradaDef}. Você só pode registrar 20 minutos antes ou depois.`, 'erro');
                 return;
             }
         } 
-        else if (tipo === 'saida' && funcDados.horario_saida) {
-            const [hSaida, mSaida] = funcDados.horario_saida.split(':').map(Number);
+        else if (tipo === 'saida' && hSaidaDef) {
+            const [hSaida, mSaida] = hSaidaDef.split(':').map(Number);
             const minSaidaOficial = (hSaida * 60) + mSaida;
             let diff = horaAtualMinutos - minSaidaOficial;
             if (diff < -720) diff += 1440; if (diff > 720) diff -= 1440;
