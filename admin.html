@@ -10,6 +10,16 @@
         .fade-in { animation: fadeIn 0.3s ease-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
         .foto-hover:hover::after { content: '📷 Mudar'; position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.6); color: white; font-size: 0.65rem; text-align: center; padding: 2px 0; border-bottom-left-radius: 9999px; border-bottom-right-radius: 9999px; }
+        .scale-in { animation: scaleIn 0.25s ease-out; }
+        @keyframes scaleIn { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
+        .spinner {
+            width: 22px; height: 22px; border-radius: 50%;
+            border: 3px solid rgba(15,23,42,0.15);
+            border-top-color: #0f172a;
+            animation: spin 0.7s linear infinite;
+            display: inline-block;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body class="bg-white font-sans flex h-screen overflow-hidden">
@@ -317,6 +327,27 @@
                 <tbody id="tabela-relatorio-tela" class="text-slate-800 text-sm sm:text-base"></tbody>
             </table></div>
             <div class="p-4 bg-slate-50 border-t shrink-0 flex justify-end"><button onclick="document.getElementById('modal-ver-relatorio').classList.replace('flex','hidden')" class="px-6 py-2 bg-slate-800 text-white font-bold rounded-lg shadow-sm">Fechar Tabela</button></div>
+        </div>
+    </div>
+
+    <!-- MODAL CONFIRMAR LOGOUT -->
+    <div id="modal-confirmar-logout" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border-t-8 border-red-500 text-center p-8 scale-in">
+            <div class="w-16 h-16 rounded-full bg-red-50 flex items-center justify-center mx-auto mb-4 text-3xl">🚪</div>
+            <h3 class="text-lg font-bold text-slate-800 uppercase tracking-wide mb-2">Sair do Sistema?</h3>
+            <p class="text-sm text-slate-500 mb-6">Você precisará informar sua matrícula e PIN novamente para voltar ao painel.</p>
+            <div class="flex gap-3">
+                <button id="btn-cancelar-logout" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-xl transition">Cancelar</button>
+                <button id="btn-confirmar-logout" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl shadow-md transition">Sim, Sair</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- OVERLAY DE SAÍDA -->
+    <div id="logout-overlay" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm hidden items-center justify-center z-[100]">
+        <div class="bg-white rounded-2xl shadow-2xl px-10 py-8 flex flex-col items-center gap-4 scale-in">
+            <span class="spinner" style="width:36px;height:36px;border-width:4px;"></span>
+            <p class="text-slate-700 font-bold uppercase tracking-wide text-sm">Saindo...</p>
         </div>
     </div>
 

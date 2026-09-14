@@ -45,8 +45,22 @@ document.addEventListener('DOMContentLoaded', () => {
         reader.readAsDataURL(file);
     });
 
+    const modalConfirmarLogout = document.getElementById('modal-confirmar-logout');
+    const logoutOverlay = document.getElementById('logout-overlay');
+
     document.getElementById('btn-logout').addEventListener('click', () => {
-        if (confirm('Sair do sistema?')) { sessionStorage.removeItem('usuarioLogado'); window.location.href = 'index.html'; }
+        modalConfirmarLogout.classList.replace('hidden', 'flex');
+    });
+    document.getElementById('btn-cancelar-logout').addEventListener('click', () => {
+        modalConfirmarLogout.classList.replace('flex', 'hidden');
+    });
+    document.getElementById('btn-confirmar-logout').addEventListener('click', () => {
+        modalConfirmarLogout.classList.replace('flex', 'hidden');
+        logoutOverlay.classList.replace('hidden', 'flex');
+        setTimeout(() => {
+            sessionStorage.removeItem('usuarioLogado');
+            window.location.href = 'index.html';
+        }, 600);
     });
 
     // Navegação SPA
@@ -126,7 +140,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     blocoSaida = `<div class="bg-rose-100 text-rose-800 font-bold px-3 py-1 rounded text-sm">🔴 ${horaOut}</div>`;
                 } else {
                     blocoSaida = `<div class="bg-amber-100 text-amber-800 font-bold px-3 py-1 rounded text-sm">🟡 Sem Saída</div>`;
-                    acoes = `<button onclick="avisarSaidaFuncionario(this)" class="text-xs text-white bg-amber-500 px-3 py-1 rounded font-bold hover:bg-amber-600 transition">Avisar</button>`;
                     // Botão "Forçar Saída" só aparece quando a hora atual (Portugal)
                     // já passou do horário de saída programado do funcionário.
                     const [sH, sM] = (p.horario_saida || '17:00').split(':').map(Number);
@@ -140,18 +153,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const ulPendentes = document.getElementById('lista-pendentes');
             ulPendentes.innerHTML = pendentes.length === 0 ? '<li class="text-slate-500 text-sm">Todos bateram o ponto! 🎉</li>' : '';
             pendentes.forEach(p => {
-                ulPendentes.innerHTML += `<li class="flex items-center justify-between p-3 bg-white border-l-4 border-l-red-500 rounded-lg mb-2 shadow-sm"><div class="flex items-center gap-3"><img src="${p.foto_url || 'https://via.placeholder.com/150'}" class="w-8 h-8 rounded-full object-cover"><p class="font-bold text-slate-800 text-sm">${p.nome_completo}</p></div><button onclick="avisarFuncionario(this)" class="text-xs text-white bg-orange-500 px-3 py-1 rounded font-bold hover:bg-orange-600 transition">Avisar</button></li>`;
+                ulPendentes.innerHTML += `<li class="flex items-center justify-between p-3 bg-white border-l-4 border-l-red-500 rounded-lg mb-2 shadow-sm"><div class="flex items-center gap-3"><img src="${p.foto_url || 'https://via.placeholder.com/150'}" class="w-8 h-8 rounded-full object-cover"><p class="font-bold text-slate-800 text-sm">${p.nome_completo}</p></div></li>`;
             });
         } catch (error) {}
     }
-
-    window.avisarFuncionario = function(btn) {
-        alert('Notificação enviada com sucesso!');
-        btn.textContent = '✅ Avisado';
-        btn.classList.replace('bg-orange-500', 'bg-emerald-100');
-        btn.classList.add('text-emerald-700', 'cursor-default');
-        btn.disabled = true;
-    };
 
     // Alterna a lista "Já Fizeram Clock In" entre Todos e Sem Saída (clock out pendente).
     window.filtrarPresentes = function(modo) {
@@ -174,14 +179,6 @@ document.addEventListener('DOMContentLoaded', () => {
             itens.forEach(li => { li.style.display = ''; });
             if (msgVazia) msgVazia.classList.add('hidden');
         }
-    };
-
-    window.avisarSaidaFuncionario = function(btn) {
-        alert('Lembrete de Clock Out enviado com sucesso!');
-        btn.textContent = '✅ Avisado';
-        btn.classList.replace('bg-amber-500', 'bg-emerald-100');
-        btn.classList.add('text-emerald-700', 'cursor-default');
-        btn.disabled = true;
     };
 
     // Força o Clock Out de um funcionário para o dia de hoje, registrando a
