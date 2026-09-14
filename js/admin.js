@@ -128,6 +128,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             const msgVazia = document.getElementById('msg-semsaida-vazia');
             if (msgVazia) msgVazia.classList.add('hidden');
+            const iconeSeta = `<svg class="w-3.5 h-3.5 text-slate-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"></path></svg>`;
             presentes.forEach(p => {
                 // Hora do Clock In exibida no fuso de Portugal.
                 const inPT = window.converterTimestampPortugal(p.clock_in);
@@ -137,18 +138,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (temSaida) {
                     const outPT = window.converterTimestampPortugal(p.clock_out);
                     const horaOut = outPT ? outPT.horaFormatada : '--:--';
-                    blocoSaida = `<div class="bg-rose-100 text-rose-800 font-bold px-3 py-1 rounded text-sm">🔴 ${horaOut}</div>`;
+                    blocoSaida = `<div class="flex items-center gap-1.5 bg-rose-50 text-rose-700 font-bold pl-2.5 pr-3 py-1.5 rounded-lg text-xs sm:text-sm whitespace-nowrap"><span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>${horaOut}</div>`;
                 } else {
-                    blocoSaida = `<div class="bg-amber-100 text-amber-800 font-bold px-3 py-1 rounded text-sm">🟡 Sem Saída</div>`;
+                    blocoSaida = `<div class="flex items-center gap-1.5 bg-amber-50 text-amber-700 font-bold pl-2.5 pr-3 py-1.5 rounded-lg text-xs sm:text-sm whitespace-nowrap"><span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>Sem Saída</div>`;
                     // Botão "Forçar Saída" só aparece quando a hora atual (Portugal)
                     // já passou do horário de saída programado do funcionário.
                     const [sH, sM] = (p.horario_saida || '17:00').split(':').map(Number);
                     const minSaida = (sH || 0) * 60 + (sM || 0);
                     if (hojePT.minutosDoDia >= minSaida) {
-                        acoes += `<button onclick="forcarSaidaFuncionario('${p.id}', '${p.nome_completo}', '${p.horario_saida || '17:00'}')" class="text-xs text-white bg-purple-600 px-3 py-1 rounded font-bold hover:bg-purple-700 transition">⚡ Forçar Saída</button>`;
+                        acoes += `<button onclick="forcarSaidaFuncionario('${p.id}', '${p.nome_completo}', '${p.horario_saida || '17:00'}')" class="flex items-center gap-1 text-xs text-white bg-purple-600 px-3 py-1.5 rounded-lg font-bold hover:bg-purple-700 transition whitespace-nowrap">⚡ Forçar Saída</button>`;
                     }
                 }
-                ulPresentes.innerHTML += `<li data-tem-saida="${temSaida}" class="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-lg mb-2 shadow-sm"><div class="flex items-center gap-3"><img src="${p.foto_url || 'https://via.placeholder.com/150'}" class="w-10 h-10 rounded-full object-cover"><div><p class="font-bold text-slate-800 text-sm sm:text-base">${p.nome_completo}</p></div></div><div class="flex items-center gap-2"><div class="bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded text-sm">${horaIn}</div>${blocoSaida}${acoes}</div></li>`;
+                ulPresentes.innerHTML += `<li data-tem-saida="${temSaida}" class="flex flex-wrap items-center justify-between gap-3 p-3.5 sm:p-4 bg-white border border-slate-100 rounded-xl mb-2.5 shadow-sm hover:shadow-md hover:border-slate-200 transition"><div class="flex items-center gap-3 min-w-0"><img src="${p.foto_url || 'https://via.placeholder.com/150'}" class="w-10 h-10 sm:w-11 sm:h-11 rounded-full object-cover border-2 border-slate-100 shrink-0"><p class="font-bold text-slate-800 text-sm sm:text-base truncate">${p.nome_completo}</p></div><div class="flex items-center gap-2 sm:gap-2.5 shrink-0"><div class="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 font-bold pl-2.5 pr-3 py-1.5 rounded-lg text-xs sm:text-sm whitespace-nowrap"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>${horaIn}</div>${iconeSeta}${blocoSaida}${acoes}</div></li>`;
             });
             const ulPendentes = document.getElementById('lista-pendentes');
             ulPendentes.innerHTML = pendentes.length === 0 ? '<li class="text-slate-500 text-sm">Todos bateram o ponto! 🎉</li>' : '';
