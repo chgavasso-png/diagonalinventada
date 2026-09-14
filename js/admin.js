@@ -436,7 +436,7 @@ document.addEventListener('DOMContentLoaded', () => {
         else if (reg && reg.clock_in && reg.clock_out) { badgeStatus = '<span class="bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded-full text-xs">🟢 Presente</span>'; tipoStat = 'presente'; }
         else if (reg && reg.clock_in && !reg.clock_out) {
             const [sH, sM] = hSaidaOficial.split(':').map(Number);
-            if (ehPassado || (ehHoje && hojePT.minutosDoDia > sH * 60 + sM + 20)) {
+            if (ehPassado || (ehHoje && hojePT.minutosDoDia > sH * 60 + sM + 5)) {
                 badgeStatus = '<span class="bg-amber-100 text-amber-800 font-bold px-3 py-1 rounded-full text-xs">⚠️ Esqueceram Out</span>'; tipoStat = 'esqueceu';
             } else { badgeStatus = '<span class="bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded-full text-xs">🟢 Trabalhando</span>'; tipoStat = 'presente'; }
         } else {
@@ -737,13 +737,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 inTimeStr = inPT.horaFormatada;
                 const [hE, mE] = hEntradaOficial.split(':').map(Number);
                 const diffE = inPT.minutosDoDia - (hE * 60 + mE);
-                if (diffE > 20) atrasoMin = diffE;
+                if (diffE > 5) atrasoMin = diffE;
             }
             if (outPT) {
                 outTimeStr = outPT.horaFormatada;
                 const [hS, mS] = hSaidaOficial.split(':').map(Number);
                 const diffS = outPT.minutosDoDia - (hS * 60 + mS);
-                if (diffS > 20) extraMin = diffS;
+                if (diffS > 5) extraMin = diffS;
                 if (inPT) {
                     const totalMin = (new Date(reg.clock_out) - new Date(reg.clock_in)) / 60000;
                     let almoco = 0;
@@ -753,13 +753,19 @@ document.addEventListener('DOMContentLoaded', () => {
                         almoco = Math.max(0, (aFH * 60 + aFM) - (aIH * 60 + aIM));
                     }
                     trabMin = Math.max(0, totalMin - almoco);
+                    // Sábado não é dia normal de trabalho: todo o tempo trabalhado
+                    // vira hora extra, não entra no total de horas trabalhadas normais.
+                    if (diaSemana === 6) {
+                        extraMin = trabMin;
+                        trabMin = 0;
+                    }
                 }
                 statusStr = 'Completo';
             } else {
                 const [sH, sM] = hSaidaOficial.split(':').map(Number);
                 const ehHoje = (dataISO === hojePT.dataISO);
                 const ehPassado = (dataISO < hojePT.dataISO);
-                if (ehPassado || (ehHoje && hojePT.minutosDoDia > sH * 60 + sM + 20)) {
+                if (ehPassado || (ehHoje && hojePT.minutosDoDia > sH * 60 + sM + 5)) {
                     statusStr = 'Esqueceu Clock Out';
                 } else {
                     statusStr = 'Trabalhando';

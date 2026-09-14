@@ -97,8 +97,8 @@ async function registrarPonto(tipo, funcionarioId) {
             let diff = horaAtualMinutos - minEntradaOficial;
             if (diff < -720) diff += 1440; if (diff > 720) diff -= 1440;
 
-            if (diff < -20 || diff > 20) {
-                mostrarMensagem(`⏰ Fora do horário! Seu Clock In é às ${hEntradaDef}. Você só pode registrar 20 minutos antes ou depois.`, 'erro');
+            if (diff < -5 || diff > 5) {
+                mostrarMensagem(`⏰ Fora do horário! Seu Clock In é às ${hEntradaDef}. Você só pode registrar 5 minutos antes ou depois.`, 'erro');
                 return;
             }
         } 
@@ -108,17 +108,17 @@ async function registrarPonto(tipo, funcionarioId) {
             let diff = horaAtualMinutos - minSaidaOficial;
             if (diff < -720) diff += 1440; if (diff > 720) diff -= 1440;
 
-            // Limite mínimo: 20 minutos ANTES do horário de saída (tolerância).
-            if (diff < -20) {
-                const limiteMin = minSaidaOficial - 20;
+            // Limite mínimo: 5 minutos ANTES do horário de saída (tolerância).
+            if (diff < -5) {
+                const limiteMin = minSaidaOficial - 5;
                 const hLim = Math.floor(limiteMin / 60) % 24;
                 const mLim = limiteMin % 60;
                 mostrarMensagem(`⏰ Muito cedo! Você não pode bater a saída antes das ${String(hLim).padStart(2,'0')}:${String(mLim).padStart(2,'0')}.`, 'erro');
                 return;
             }
-            // Clock Out permite até 20 minutos DEPOIS do horário (tolerância).
-            // Acima de 20 minutos, só o Administrador pode registrar (hora extra).
-            if (diff > 20) {
+            // Clock Out permite até 5 minutos DEPOIS do horário (tolerância).
+            // Acima de 5 minutos, só o Administrador pode registrar (hora extra).
+            if (diff > 5) {
                 mostrarMensagem(`⏰ Expediente encerrado! Apenas o Administrador pode registrar saídas com Hora Extra no painel.`, 'erro');
                 return;
             }
