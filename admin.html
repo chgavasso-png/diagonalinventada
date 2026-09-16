@@ -110,7 +110,7 @@
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+                <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 sm:gap-6">
                     <div class="bg-white p-6 rounded-xl shadow-sm border-l-4 border-emerald-500 flex items-center justify-between">
                         <div>
                             <p class="text-xs sm:text-sm font-bold text-slate-500 uppercase">Presentes</p>
@@ -132,6 +132,13 @@
                         </div>
                         <div class="text-3xl opacity-20">😴</div>
                     </div>
+                    <div class="bg-white p-6 rounded-xl shadow-sm border-l-4 border-cyan-500 flex items-center justify-between">
+                        <div>
+                            <p class="text-xs sm:text-sm font-bold text-slate-500 uppercase">De Férias</p>
+                            <p class="text-2xl sm:text-3xl font-black text-slate-800 mt-1" id="gd-ferias">0</p>
+                        </div>
+                        <div class="text-3xl opacity-20">🏖️</div>
+                    </div>
                     <div class="bg-white p-6 rounded-xl shadow-sm border-l-4 border-amber-500 flex items-center justify-between">
                         <div>
                             <p class="text-xs sm:text-sm font-bold text-slate-500 uppercase">Esqueceram Clock Out</p>
@@ -146,6 +153,7 @@
                         <span class="font-bold text-orange-950 text-sm">☑️ Selecionados: <span id="gd-qtd-selecionados" class="bg-orange-200 px-2.5 py-0.5 rounded-full text-orange-950 font-black">0</span></span>
                     </div>
                     <div class="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+                        <button onclick="abrirModalFeriasSelecionados()" class="flex-1 sm:flex-none bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs px-3.5 py-2 rounded-lg shadow-sm transition">🏖️ Dar Férias</button>
                         <button onclick="executarAcaoEmLote('folga')" class="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3.5 py-2 rounded-lg shadow-sm transition">😴 Dar Folga</button>
                         <button onclick="executarAcaoEmLote('falta')" class="flex-1 sm:flex-none bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-3.5 py-2 rounded-lg shadow-sm transition">❌ Marcar Falta</button>
                         <button onclick="executarAcaoEmLote('normal')" class="flex-1 sm:flex-none bg-slate-700 hover:bg-slate-800 text-white font-bold text-xs px-3.5 py-2 rounded-lg shadow-sm transition">↺ Voltar Normal</button>
@@ -294,6 +302,38 @@
                 <div class="pt-3 border-t flex justify-end gap-3">
                     <button type="button" onclick="document.getElementById('modal-ponto-gestao').classList.replace('flex','hidden')" class="px-5 py-2.5 bg-slate-200 text-slate-700 font-bold rounded-lg text-sm">Cancelar</button>
                     <button type="submit" class="px-6 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg shadow-md text-sm uppercase">Confirmar Ponto</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL FÉRIAS (1 FUNCIONÁRIO OU LOTE, DATA A DATA) -->
+    <div id="modal-ferias" class="fixed inset-0 bg-slate-900 bg-opacity-80 hidden items-center justify-center z-50 p-4 fade-in">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden border-t-8 border-cyan-600">
+            <div class="px-6 py-4 flex justify-between items-center border-b border-slate-100">
+                <h3 class="text-slate-800 font-black text-lg uppercase flex items-center gap-2">🏖️ Marcar Férias</h3>
+                <button onclick="document.getElementById('modal-ferias').classList.replace('flex','hidden')" class="text-slate-400 text-2xl font-bold">&times;</button>
+            </div>
+            <form id="form-ferias" class="p-6 space-y-4">
+                <input type="hidden" id="fer-func-ids">
+                <p id="fer-subtitulo" class="text-xs font-bold text-cyan-950 bg-cyan-50 p-3 rounded-lg border border-cyan-200 text-center"></p>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 uppercase mb-1">De</label>
+                        <input type="date" id="fer-data-inicio" class="w-full px-4 py-2 border rounded font-bold text-slate-800 focus:border-cyan-500 focus:outline-none" required>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Até</label>
+                        <input type="date" id="fer-data-fim" class="w-full px-4 py-2 border rounded font-bold text-slate-800 focus:border-cyan-500 focus:outline-none" required>
+                    </div>
+                </div>
+                <p class="text-xs text-slate-500">Todos os dias do período (incluindo fins de semana) ficam marcados como Férias — não contam como falta nem geram hora extra.</p>
+                <div id="fer-erro" class="text-red-600 text-sm hidden font-bold bg-red-50 p-2 rounded text-center"></div>
+
+                <div class="pt-3 border-t flex justify-end gap-3">
+                    <button type="button" onclick="document.getElementById('modal-ferias').classList.replace('flex','hidden')" class="px-5 py-2.5 bg-slate-200 text-slate-700 font-bold rounded-lg text-sm">Cancelar</button>
+                    <button type="submit" id="btn-confirmar-ferias" class="px-6 py-2.5 bg-cyan-600 hover:bg-cyan-700 text-white font-bold rounded-lg shadow-md text-sm uppercase disabled:opacity-60">Confirmar Férias</button>
                 </div>
             </form>
         </div>

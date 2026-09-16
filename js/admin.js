@@ -137,6 +137,8 @@ document.addEventListener('DOMContentLoaded', () => {
             (equipe || []).forEach(func => {
                 const registroFunc = (pontosHoje || []).find(p => p.funcionario_id === func.id);
                 if (registroFunc && registroFunc.clock_in) presentes.push({ ...func, clock_in: registroFunc.clock_in, clock_out: registroFunc.clock_out || null });
+                // Férias e Folga não contam como pendente/falta no dia.
+                else if (registroFunc && (registroFunc.status_dia === 'ferias' || registroFunc.status_dia === 'folga')) { /* dispensado hoje */ }
                 else pendentes.push(func);
             });
             document.getElementById('dash-total').textContent = equipe ? equipe.length : 0;
@@ -309,6 +311,85 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) { alert('Erro ao forçar saída.'); }
     };
 
+    // -------------------------------------------------------------------------
+    // FÉRIAS: marca um intervalo de datas (de/até, inclusive) como 'ferias' para
+    // um ou mais funcionários. Sábado e domingo dentro do período também ficam
+    // marcados (uniformiza o período), mas nunca contam como falta/hora extra,
+    // pois o cálculo dos relatórios já trata 'ferias' como dia neutro.
+    // -------------------------------------------------------------------------
+    window.abrirModalFerias = function(funcIds, nomeOuLabel) {
+        if (!Array.isArray(funcIds)) funcIds = [funcIds];
+        if (funcIds.length === 0) { alert('Selecione pelo menos um funcionário.'); return; }
+        document.getElementById('form-ferias').reset();
+        document.getElementById('fer-func-ids').value = funcIds.join(',');
+        const subtitulo = document.getElementById('fer-subtitulo');
+        subtitulo.textContent = funcIds.length === 1 ? `Funcionário: ${nomeOuLabel || 'Selecionado'}` : `${funcIds.length} funcionários selecionados`;
+        document.getElementById('fer-erro').classList.add('hidden');
+        const hoje = window.obterHorarioPortugal().dataISO;
+        document.getElementById('fer-data-inicio').value = hoje;
+        document.getElementById('fer-data-fim').value = hoje;
+        document.getElementById('modal-ferias').classList.replace('hidden', 'flex');
+    };
+
+    window.abrirModalFeriasSelecionados = function() {
+        const ids = window.obterIdsSelecionados();
+        if (ids.length === 0) { alert('Selecione pelo menos um funcionário.'); return; }
+        window.abrirModalFerias(ids, null);
+    };
+
+    const formFerias = document.getElementById('form-ferias');
+    if (formFerias) {
+        formFerias.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const idsStr = document.getElementById('fer-func-ids').value;
+            if (!idsStr) return;
+            const ids = idsStr.split(',').filter(Boolean);
+            const dataInicio = document.getElementById('fer-data-inicio').value;
+            const dataFim = document.getElementById('fer-data-fim').value;
+            const erroEl = document.getElementById('fer-erro');
+            erroEl.classList.add('hidden');
+
+            if (!dataInicio || !dataFim) { erroEl.textContent = 'Informe as duas datas.'; erroEl.classList.remove('hidden'); return; }
+            if (dataFim < dataInicio) { erroEl.textContent = 'A data final não pode ser antes da inicial.'; erroEl.classList.remove('hidden'); return; }
+
+            // Lista todos os dias do intervalo (inclusive) em UTC "puro" para não
+            // sofrer com deslocamento de fuso ao somar dias.
+            const [anoI, mesI, diaI] = dataInicio.split('-').map(Number);
+            const [anoF, mesF, diaF] = dataFim.split('-').map(Number);
+            const cursor = new Date(Date.UTC(anoI, mesI - 1, diaI));
+            const fim = new Date(Date.UTC(anoF, mesF - 1, diaF));
+            const datas = [];
+            while (cursor <= fim) {
+                datas.push(`${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, '0')}-${String(cursor.getUTCDate()).padStart(2, '0')}`);
+                cursor.setUTCDate(cursor.getUTCDate() + 1);
+            }
+
+            if (datas.length > 90) { erroEl.textContent = 'Período muito longo (máx. 90 dias).'; erroEl.classList.remove('hidden'); return; }
+
+            const btnConfirmar = document.getElementById('btn-confirmar-ferias');
+            const txtOriginal = btnConfirmar.textContent;
+            btnConfirmar.disabled = true;
+            btnConfirmar.textContent = 'Salvando...';
+
+            try {
+                for (const funcId of ids) {
+                    for (const dataISO of datas) {
+                        await window.definirStatusDiaSilencioso(funcId, dataISO, 'ferias');
+                    }
+                }
+                document.getElementById('modal-ferias').classList.replace('flex', 'hidden');
+                carregarGestaoDia();
+                carregarDashboard();
+            } catch (err) {
+                erroEl.textContent = 'Erro ao salvar férias.';
+                erroEl.classList.remove('hidden');
+            } finally {
+                btnConfirmar.disabled = false;
+                btnConfirmar.textContent = txtOriginal;
+            }
+        });
+    }
+
     window.abrirModalPontoGestao = function(funcIds) {
         if (!Array.isArray(funcIds)) funcIds = [funcIds];
         if (funcIds.length === 0) { alert('Selecione pelo menos um funcionário.'); return; }
@@ -456,7 +537,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (inPT) inTimeStr = inPT.horaFormatada;
         if (outPT) outTimeStr = outPT.horaFormatada;
 
-        if (stOriginal === 'folga') { badgeStatus = '<span class="bg-blue-100 text-blue-800 font-bold px-3 py-1 rounded-full text-xs">😴 De Folga</span>'; tipoStat = 'folga'; }
+        if (stOriginal === 'ferias') { badgeStatus = '<span class="bg-cyan-100 text-cyan-800 font-bold px-3 py-1 rounded-full text-xs">🏖️ De Férias</span>'; tipoStat = 'ferias'; }
+        else if (stOriginal === 'folga') { badgeStatus = '<span class="bg-blue-100 text-blue-800 font-bold px-3 py-1 rounded-full text-xs">😴 De Folga</span>'; tipoStat = 'folga'; }
         else if (stOriginal === 'falta') { badgeStatus = '<span class="bg-red-100 text-red-800 font-bold px-3 py-1 rounded-full text-xs">❌ Falta</span>'; tipoStat = 'falta'; }
         else if (reg && reg.clock_in && reg.clock_out) { badgeStatus = '<span class="bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded-full text-xs">🟢 Presente</span>'; tipoStat = 'presente'; }
         else if (reg && reg.clock_in && !reg.clock_out) {
@@ -502,7 +584,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window.ultimoGestaoFuncionarios = funcionarios || [];
             window.ultimoGestaoRegistros = registros || [];
 
-            let totalPresentes = 0, totalFaltas = 0, totalFolgas = 0, totalEsqueceuOut = 0;
+            let totalPresentes = 0, totalFaltas = 0, totalFolgas = 0, totalEsqueceuOut = 0, totalFerias = 0;
             const hojePT = window.obterHorarioPortugal();
             const ehHoje = (dataISO === hojePT.dataISO);
             const ehPassado = (dataISO < hojePT.dataISO);
@@ -516,8 +598,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 else if (info.tipoStat === 'falta') totalFaltas++;
                 else if (info.tipoStat === 'folga') totalFolgas++;
                 else if (info.tipoStat === 'esqueceu') totalEsqueceuOut++;
+                else if (info.tipoStat === 'ferias') totalFerias++;
 
                 let btns = `<div class="flex items-center justify-center gap-1 flex-wrap">`;
+                btns += info.stOriginal === 'ferias' ? `<button onclick="definirStatusDia('${func.id}','${dataISO}','normal')" class="text-xs bg-slate-200 text-slate-700 font-bold px-2 py-1 rounded">Normal</button>` : `<button onclick="abrirModalFerias(['${func.id}'], '${func.nome_completo.replace(/'/g, "\\'")}')" class="text-xs bg-cyan-600 text-white font-bold px-2 py-1 rounded">🏖️ Férias</button>`;
                 btns += info.stOriginal === 'folga' ? `<button onclick="definirStatusDia('${func.id}','${dataISO}','normal')" class="text-xs bg-slate-200 text-slate-700 font-bold px-2 py-1 rounded">Normal</button>` : `<button onclick="definirStatusDia('${func.id}','${dataISO}','folga')" class="text-xs bg-blue-600 text-white font-bold px-2 py-1 rounded">😴 Folga</button>`;
                 btns += info.stOriginal === 'falta' ? `<button onclick="definirStatusDia('${func.id}','${dataISO}','normal')" class="text-xs bg-slate-200 text-slate-700 font-bold px-2 py-1 rounded">Normal</button>` : `<button onclick="definirStatusDia('${func.id}','${dataISO}','falta')" class="text-xs bg-red-600 text-white font-bold px-2 py-1 rounded">❌ Falta</button>`;
                 if (reg && reg.clock_in && !reg.clock_out) btns += `<button onclick="forcarClockOutGestao('${func.id}','${dataISO}','${info.hSaidaOficial}')" class="text-xs bg-purple-600 text-white font-bold px-2 py-1 rounded">⚡ Out</button>`;
@@ -531,6 +615,8 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('gd-faltas').textContent = totalFaltas;
             document.getElementById('gd-folgas').textContent = totalFolgas;
             document.getElementById('gd-esqueceu-out').textContent = totalEsqueceuOut;
+            const elFerias = document.getElementById('gd-ferias');
+            if (elFerias) elFerias.textContent = totalFerias;
         } catch (err) {
             tbody.innerHTML = '<tr><td colspan="7" class="p-8 text-center text-red-500 font-bold">Erro ao carregar dados.</td></tr>';
         }
@@ -548,7 +634,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const foto = func.foto_url || 'https://via.placeholder.com/150';
                 const badgeRole = func.role === 'admin' ? `<span class="bg-orange-100 text-orange-700 px-2 py-1 rounded text-xs font-bold">Admin</span>` : `<span class="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs font-bold">Padrão</span>`;
                 let btnExcluir = func.id !== usuarioLogado.id ? `<button onclick="excluirFuncionario('${func.id}')" class="text-red-500 hover:bg-red-50 p-2 rounded transition" title="Excluir">🗑️</button>` : '';
-                tbody.innerHTML += `<tr class="border-b border-slate-100 hover:bg-slate-50"><td class="p-3 sm:p-4 flex items-center gap-3"><img src="${foto}" class="w-8 h-8 sm:w-10 sm:h-10 rounded-full object-cover shadow-sm"><div><p class="font-bold text-slate-800 text-sm sm:text-base">${func.nome_completo}</p></div></td><td class="p-3 sm:p-4 font-mono text-xs sm:text-sm text-slate-600">${func.matricula}</td><td class="p-3 sm:p-4 text-center hidden sm:table-cell">${badgeRole}</td><td class="p-3 sm:p-4 text-center flex justify-center gap-1"><button onclick="abrirModalForcar('${func.id}', '${func.nome_completo}')" class="text-purple-600 hover:bg-purple-100 p-2 rounded transition" title="Forçar Ponto Manual">⚡</button><button onclick="abrirModalSenha('${func.id}', '${func.nome_completo}')" class="text-yellow-600 hover:bg-yellow-100 p-2 rounded transition" title="Alterar Senha do Funcionário">🔑</button><button onclick="abrirModalEdicao('${func.id}')" class="text-slate-500 hover:bg-slate-200 p-2 rounded transition" title="Editar Perfil">✏️</button>${btnExcluir}</td></tr>`;
+                const nomeEscapado = func.nome_completo.replace(/'/g, "\\'");
+                tbody.innerHTML += `<tr class="border-b border-slate-100 hover:bg-slate-50"><td class="p-3 sm:p-4 flex items-center gap-3"><img src="${foto}" class="w-8 h-8 sm:w-10 sm:h-10 rounded-full object-cover shadow-sm"><div><p class="font-bold text-slate-800 text-sm sm:text-base">${func.nome_completo}</p></div></td><td class="p-3 sm:p-4 font-mono text-xs sm:text-sm text-slate-600">${func.matricula}</td><td class="p-3 sm:p-4 text-center hidden sm:table-cell">${badgeRole}</td><td class="p-3 sm:p-4 text-center flex justify-center gap-1"><button onclick="abrirModalFerias(['${func.id}'], '${nomeEscapado}')" class="text-cyan-600 hover:bg-cyan-100 p-2 rounded transition" title="Marcar Férias">🏖️</button><button onclick="abrirModalForcar('${func.id}', '${func.nome_completo}')" class="text-purple-600 hover:bg-purple-100 p-2 rounded transition" title="Forçar Ponto Manual">⚡</button><button onclick="abrirModalSenha('${func.id}', '${func.nome_completo}')" class="text-yellow-600 hover:bg-yellow-100 p-2 rounded transition" title="Alterar Senha do Funcionário">🔑</button><button onclick="abrirModalEdicao('${func.id}')" class="text-slate-500 hover:bg-slate-200 p-2 rounded transition" title="Editar Perfil">✏️</button>${btnExcluir}</td></tr>`;
             });
         } catch (err) {}
     }
@@ -765,7 +852,9 @@ document.addEventListener('DOMContentLoaded', () => {
         let inTimeStr = '--:--', outTimeStr = '--:--', atrasoMin = 0, extraMin = 0, trabMin = 0, faltaMin = 0, statusStr = 'Vazio';
         const stOriginal = reg ? reg.status_dia : 'normal';
 
-        if (stOriginal === 'folga') {
+        if (stOriginal === 'ferias') {
+            statusStr = 'Férias';
+        } else if (stOriginal === 'folga') {
             statusStr = 'De Folga';
         } else if (stOriginal === 'falta') {
             statusStr = 'Falta';
@@ -844,7 +933,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const CORES_STATUS_EXCEL = {
         'Completo': 'FF059669', 'De Folga': 'FF2563EB', 'Falta': 'FFDC2626',
         'Esqueceu Clock Out': 'FFD97706', 'Trabalhando': 'FF10B981',
-        'Sábado Opcional': 'FF9333EA', 'Aguardando': 'FF94A3B8', 'Vazio': 'FF94A3B8'
+        'Sábado Opcional': 'FF9333EA', 'Férias': 'FF0891B2',
+        'Aguardando': 'FF94A3B8', 'Vazio': 'FF94A3B8'
     };
 
     async function preencherAbaFuncionario(wb, ws, func, nomeCompleto, mesAno, ano, mes, ultimoDiaNumero, registros, hojePT, logoImgId) {
@@ -1015,8 +1105,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 else if (dDia.statusStr === 'Esqueceu Clock Out') statusBadge = '<span class="text-amber-600 font-bold">⚠️ Sem Out</span>';
                 else if (dDia.statusStr === 'Trabalhando') statusBadge = '<span class="text-emerald-500 font-bold">🟢 Trab</span>';
                 else if (dDia.statusStr === 'Sábado Opcional') statusBadge = '<span class="text-purple-600 font-bold">⚡ Sáb. Opcional</span>';
+                else if (dDia.statusStr === 'Férias') statusBadge = '<span class="text-cyan-600 font-bold">🏖️ Férias</span>';
 
-                if (reg || dDia.statusStr === 'Falta' || dDia.statusStr === 'De Folga') {
+                if (reg || dDia.statusStr === 'Falta' || dDia.statusStr === 'De Folga' || dDia.statusStr === 'Férias') {
                     tbody.innerHTML += `<tr class="border-b border-slate-100 hover:bg-slate-50"><td class="p-3 sm:p-4 font-medium text-slate-600">${dataBR}</td><td class="p-3 sm:p-4 text-center font-mono">${dDia.inTimeStr}</td><td class="p-3 sm:p-4 text-center font-mono">${dDia.outTimeStr}</td><td class="p-3 sm:p-4 text-center text-red-600 font-bold">${dDia.atrasoMin > 0 ? dDia.atrasoMin + 'm' : '--'}</td><td class="p-3 sm:p-4 text-center text-blue-600 font-bold">${dDia.extraMin > 0 ? dDia.extraMin + 'm' : '--'}</td><td class="p-3 sm:p-4 text-center text-orange-600 font-bold">${dDia.faltaMin > 0 ? dDia.faltaMin + 'm' : '--'}</td><td class="p-3 sm:p-4 text-center">${statusBadge}</td></tr>`;
                 }
             }
