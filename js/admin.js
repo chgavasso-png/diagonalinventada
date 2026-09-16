@@ -1,7 +1,34 @@
 // js/admin.js
 
+// Dados da empresa usados no cabeçalho dos relatórios em Excel.
+// Preencher "endereco" quando definido (fica em branco até lá).
+const EMPRESA = {
+    nome: 'Diagonal Inventada',
+    subtitulo: 'Metalúrgica e Engenharia',
+    endereco: '',
+    corMarca: 'FF0A0869',   // azul da logo (ARGB)
+    corDestaque: 'FFE16726', // laranja da logo (ARGB)
+    logoPath: 'logo.png'
+};
+
+let _logoBase64Cache = null;
+async function obterLogoBase64() {
+    if (_logoBase64Cache) return _logoBase64Cache;
+    try {
+        const resp = await fetch(EMPRESA.logoPath);
+        const blob = await resp.blob();
+        _logoBase64Cache = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+    } catch (e) { _logoBase64Cache = null; }
+    return _logoBase64Cache;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-    
+
     // Verificação de Segurança
     const usuarioString = sessionStorage.getItem('usuarioLogado');
     if (!usuarioString) { window.location.href = 'index.html'; return; }
@@ -439,6 +466,8 @@ document.addEventListener('DOMContentLoaded', () => {
             } else { badgeStatus = '<span class="bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded-full text-xs">🟢 Trabalhando</span>'; tipoStat = 'presente'; }
         } else {
             if (diaSemanaIndex === 0) { badgeStatus = '<span class="bg-blue-50 text-blue-600 font-bold px-3 py-1 rounded-full text-xs">😴 Folga Dom</span>'; tipoStat = 'folga'; }
+            // Sábado é opcional (só conta como hora extra): não ir não é falta.
+            else if (diaSemanaIndex === 6) { badgeStatus = '<span class="bg-purple-50 text-purple-600 font-bold px-3 py-1 rounded-full text-xs">⚡ Sábado Opcional</span>'; tipoStat = 'sabado'; }
             else if (ehPassado || ehHoje) { badgeStatus = '<span class="bg-red-100 text-red-800 font-bold px-3 py-1 rounded-full text-xs">❌ Não Foi Trabalhar</span>'; tipoStat = 'falta'; }
             else { badgeStatus = '<span class="bg-slate-100 text-slate-600 font-bold px-3 py-1 rounded-full text-xs">⏳ Aguardando</span>'; }
         }
@@ -721,13 +750,26 @@ document.addEventListener('DOMContentLoaded', () => {
             descAlmoco = false;
         }
 
-        let inTimeStr = '--:--', outTimeStr = '--:--', atrasoMin = 0, extraMin = 0, trabMin = 0, statusStr = 'Vazio';
+        // Jornada esperada do dia (em minutos), já descontando o almoço nos dias
+        // de semana. Usada para calcular "horas faltantes" quando o funcionário
+        // trabalha menos do que o contratado (chega tarde, sai antes, ou falta).
+        const [hEEsp, mEEsp] = hEntradaOficial.split(':').map(Number);
+        const [hSEsp, mSEsp] = hSaidaOficial.split(':').map(Number);
+        let expectedMin = Math.max(0, (hSEsp * 60 + mSEsp) - (hEEsp * 60 + mEEsp));
+        if (descAlmoco) {
+            const [aIH0, aIM0] = (func.horario_almoco_inicio || '13:00').split(':').map(Number);
+            const [aFH0, aFM0] = (func.horario_almoco_fim || '14:00').split(':').map(Number);
+            expectedMin = Math.max(0, expectedMin - Math.max(0, (aFH0 * 60 + aFM0) - (aIH0 * 60 + aIM0)));
+        }
+
+        let inTimeStr = '--:--', outTimeStr = '--:--', atrasoMin = 0, extraMin = 0, trabMin = 0, faltaMin = 0, statusStr = 'Vazio';
         const stOriginal = reg ? reg.status_dia : 'normal';
 
         if (stOriginal === 'folga') {
             statusStr = 'De Folga';
         } else if (stOriginal === 'falta') {
             statusStr = 'Falta';
+            faltaMin = expectedMin;
         } else if (reg && reg.clock_in) {
             const inPT = window.converterTimestampPortugal(reg.clock_in);
             const outPT = reg.clock_out ? window.converterTimestampPortugal(reg.clock_out) : null;
@@ -751,11 +793,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         almoco = Math.max(0, (aFH * 60 + aFM) - (aIH * 60 + aIM));
                     }
                     trabMin = Math.max(0, totalMin - almoco);
+                    // Horas faltantes: diferença entre a jornada contratada e o
+                    // tempo efetivamente trabalhado (chegou tarde e/ou saiu antes).
+                    faltaMin = Math.round(Math.max(0, expectedMin - trabMin));
                     // Sábado não é dia normal de trabalho: todo o tempo trabalhado
-                    // vira hora extra, não entra no total de horas trabalhadas normais.
+                    // vira hora extra, não entra no total de horas trabalhadas normais,
+                    // e nunca gera "horas faltantes" (o dia é opcional).
                     if (diaSemana === 6) {
                         extraMin = trabMin;
                         trabMin = 0;
+                        faltaMin = 0;
                     }
                 }
                 statusStr = 'Completo';
@@ -771,15 +818,159 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } else {
             if (diaSemana === 0) statusStr = 'Folga Domingo';
+            // Sábado é opcional (só conta como hora extra): não ir não é falta.
+            else if (diaSemana === 6) statusStr = 'Sábado Opcional';
             else {
                 const ehHoje = (dataISO === hojePT.dataISO);
                 const ehPassado = (dataISO < hojePT.dataISO);
-                if (ehPassado || ehHoje) statusStr = 'Falta';
+                if (ehPassado || ehHoje) { statusStr = 'Falta'; faltaMin = expectedMin; }
                 else statusStr = 'Aguardando';
             }
         }
 
-        return { dataISO, inTimeStr, outTimeStr, atrasoMin, extraMin, trabMin, statusStr };
+        // Sábado e Domingo nunca contam para "horas faltantes": são dias
+        // opcionais/de folga, não jornada contratada.
+        if (diaSemana === 0 || diaSemana === 6) faltaMin = 0;
+
+        return { dataISO, inTimeStr, outTimeStr, atrasoMin, extraMin, trabMin, faltaMin, statusStr };
+    }
+
+    // -------------------------------------------------------------------------
+    // Preenche uma aba do Excel (ExcelJS) com o cabeçalho da empresa (logo,
+    // nome, horários) e a tabela diária de ponto de um funcionário. Usada
+    // tanto no relatório individual quanto no relatório consolidado (Todos).
+    // Retorna os totais do mês para alimentar o resumo geral.
+    // -------------------------------------------------------------------------
+    const CORES_STATUS_EXCEL = {
+        'Completo': 'FF059669', 'De Folga': 'FF2563EB', 'Falta': 'FFDC2626',
+        'Esqueceu Clock Out': 'FFD97706', 'Trabalhando': 'FF10B981',
+        'Sábado Opcional': 'FF9333EA', 'Aguardando': 'FF94A3B8', 'Vazio': 'FF94A3B8'
+    };
+
+    async function preencherAbaFuncionario(wb, ws, func, nomeCompleto, mesAno, ano, mes, ultimoDiaNumero, registros, hojePT, logoImgId) {
+        ws.columns = [
+            { width: 13 }, { width: 11 }, { width: 11 }, { width: 11 },
+            { width: 13 }, { width: 13 }, { width: 13 }, { width: 18 }
+        ];
+
+        // logoImgId é o id de uma imagem já registada uma única vez no workbook
+        // (wb.addImage), reaproveitado aqui para não duplicar os bytes da logo
+        // em cada aba/funcionário — o que inflaria bastante o tamanho do arquivo.
+        if (logoImgId !== null && logoImgId !== undefined) {
+            try {
+                ws.addImage(logoImgId, { tl: { col: 0, row: 0 }, ext: { width: 90, height: 61 } });
+            } catch (e) {}
+        }
+
+        ws.mergeCells('B1:H1');
+        ws.getCell('B1').value = EMPRESA.nome.toUpperCase();
+        ws.getCell('B1').font = { bold: true, size: 16, color: { argb: EMPRESA.corMarca } };
+        ws.getRow(1).height = 22;
+
+        ws.mergeCells('B2:H2');
+        ws.getCell('B2').value = EMPRESA.subtitulo;
+        ws.getCell('B2').font = { italic: true, size: 10, color: { argb: 'FF64748B' } };
+
+        let linha = 3;
+        if (EMPRESA.endereco) {
+            ws.mergeCells(`B${linha}:H${linha}`);
+            ws.getCell(`B${linha}`).value = EMPRESA.endereco;
+            ws.getCell(`B${linha}`).font = { size: 9, color: { argb: 'FF64748B' } };
+            linha++;
+        }
+        linha = Math.max(linha + 1, 5);
+
+        ws.mergeCells(`A${linha}:H${linha}`);
+        const tituloCell = ws.getCell(`A${linha}`);
+        tituloCell.value = `RELATÓRIO DE PONTO — ${nomeCompleto}`;
+        tituloCell.font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
+        tituloCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: EMPRESA.corMarca } };
+        tituloCell.alignment = { vertical: 'middle', indent: 1 };
+        ws.getRow(linha).height = 20;
+        linha++;
+
+        const infoLinhas = [
+            ['Mês Referência:', mesAno],
+            ['Horário Seg-Sex:', `${func.horario_entrada || '08:00'} às ${func.horario_saida || '17:00'}`],
+            ['Sábado (Hora Extra):', `${func.horario_entrada_sabado || '07:00'} às ${func.horario_saida_sabado || '12:00'}`],
+        ];
+        infoLinhas.forEach(([label, valor]) => {
+            ws.getCell(`A${linha}`).value = label;
+            ws.getCell(`A${linha}`).font = { bold: true, size: 9, color: { argb: 'FF475569' } };
+            ws.mergeCells(`B${linha}:D${linha}`);
+            ws.getCell(`B${linha}`).value = valor;
+            ws.getCell(`B${linha}`).font = { size: 9, color: { argb: 'FF334155' } };
+            linha++;
+        });
+        linha++;
+
+        const linhaHeaderTabela = linha;
+        const headers = ['Data', 'Entrada', 'Saída', 'Atraso', 'Hora Extra', 'Faltando', 'Trabalhado', 'Status'];
+        headers.forEach((h, i) => {
+            const cell = ws.getRow(linha).getCell(i + 1);
+            cell.value = h;
+            cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        });
+        ws.getRow(linha).height = 20;
+        linha++;
+
+        let totalAtraso = 0, totalExtra = 0, totalTrabalhado = 0, totalFalta = 0;
+
+        for (let d = 1; d <= ultimoDiaNumero; d++) {
+            const dataISO = `${ano}-${mes}-${String(d).padStart(2, '0')}`;
+            const dataBR = `${String(d).padStart(2, '0')}/${mes}/${ano}`;
+            const reg = (registros || []).find(r => r.funcionario_id === func.id && r.data_registro === dataISO);
+            const dDia = calcularDadosDia(d, ano, mes, func, reg, hojePT);
+
+            totalAtraso += dDia.atrasoMin;
+            totalExtra += dDia.extraMin;
+            totalTrabalhado += dDia.trabMin;
+            totalFalta += dDia.faltaMin;
+
+            const row = ws.getRow(linha);
+            row.getCell(1).value = dataBR;
+            row.getCell(2).value = dDia.inTimeStr;
+            row.getCell(3).value = dDia.outTimeStr;
+            row.getCell(4).value = dDia.atrasoMin > 0 ? formatarHoraMinSeg(dDia.atrasoMin) : '—';
+            row.getCell(5).value = dDia.extraMin > 0 ? formatarHoraMinSeg(dDia.extraMin) : '—';
+            row.getCell(6).value = dDia.faltaMin > 0 ? formatarHoraMinSeg(dDia.faltaMin) : '—';
+            row.getCell(7).value = dDia.trabMin > 0 ? formatarHoraMinSeg(dDia.trabMin) : '—';
+            row.getCell(8).value = dDia.statusStr;
+            row.getCell(8).font = { bold: true, color: { argb: CORES_STATUS_EXCEL[dDia.statusStr] || 'FF334155' } };
+            for (let c = 1; c <= 8; c++) {
+                row.getCell(c).alignment = { horizontal: c === 1 ? 'left' : 'center' };
+                if (d % 2 === 0) row.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+            }
+            linha++;
+        }
+
+        linha++;
+        ws.mergeCells(`A${linha}:H${linha}`);
+        ws.getCell(`A${linha}`).value = 'RESUMO DO MÊS';
+        ws.getCell(`A${linha}`).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        ws.getCell(`A${linha}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: EMPRESA.corDestaque } };
+        ws.getCell(`A${linha}`).alignment = { vertical: 'middle', indent: 1 };
+        linha++;
+
+        const resumoLinhas = [
+            ['Total de Atrasos:', formatarHoraMinSeg(totalAtraso), 'FFDC2626'],
+            ['Total de Horas Extras:', formatarHoraMinSeg(totalExtra), 'FF2563EB'],
+            ['Total de Horas Faltantes:', formatarHoraMinSeg(totalFalta), 'FFD97706'],
+            ['Total Trabalhado:', formatarHoraMinSeg(totalTrabalhado), 'FF059669'],
+        ];
+        resumoLinhas.forEach(([label, valor, cor]) => {
+            ws.getCell(`A${linha}`).value = label;
+            ws.getCell(`A${linha}`).font = { bold: true, size: 10 };
+            ws.getCell(`B${linha}`).value = valor;
+            ws.getCell(`B${linha}`).font = { bold: true, size: 10, color: { argb: cor } };
+            linha++;
+        });
+
+        ws.views = [{ state: 'frozen', ySplit: linhaHeaderTabela }];
+
+        return { totalAtraso, totalExtra, totalTrabalhado, totalFalta };
     }
 
     window.abrirRelatorioTela = async function(idFuncionario, nomeFuncionario) {
@@ -793,7 +984,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('relatorio-tela-nome').textContent = nomeFuncionario;
         document.getElementById('relatorio-tela-mes').textContent = `Período: ${mesAno}`;
         const tbody = document.getElementById('tabela-relatorio-tela');
-        tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-slate-500">Processando cálculos...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="p-8 text-center text-slate-500">Processando cálculos...</td></tr>';
         document.getElementById('modal-ver-relatorio').classList.replace('hidden', 'flex');
 
         try {
@@ -802,19 +993,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
             document.getElementById('relatorio-tela-mes').textContent = `Período: ${mesAno} | Seg-Sex: ${funcDados.horario_entrada || '08:00'}-${funcDados.horario_saida || '17:00'} | Sáb: ${funcDados.horario_entrada_sabado || '07:00'}-${funcDados.horario_saida_sabado || '12:00'}`;
             tbody.innerHTML = '';
-            let totalAtraso = 0, totalExtra = 0, totalTrabalhado = 0;
+            let totalAtraso = 0, totalExtra = 0, totalTrabalhado = 0, totalFalta = 0;
             const hojePT = window.obterHorarioPortugal();
 
             for (let d = 1; d <= ultimoDiaNumero; d++) {
                 const dataBR = `${String(d).padStart(2, '0')}/${mes}`;
                 const dataISO = `${ano}-${mes}-${String(d).padStart(2, '0')}`;
                 const reg = (registros || []).find(r => r.data_registro === dataISO);
-                
+
                 const dDia = calcularDadosDia(d, ano, mes, funcDados, reg, hojePT);
 
                 totalAtraso += dDia.atrasoMin;
                 totalExtra += dDia.extraMin;
                 totalTrabalhado += dDia.trabMin;
+                totalFalta += dDia.faltaMin;
 
                 let statusBadge = '<span class="text-slate-400">-</span>';
                 if (dDia.statusStr === 'Completo') statusBadge = '<span class="text-emerald-600 font-bold">✅ Ok</span>';
@@ -822,27 +1014,30 @@ document.addEventListener('DOMContentLoaded', () => {
                 else if (dDia.statusStr === 'Falta') statusBadge = '<span class="text-red-600 font-bold">❌ Falta</span>';
                 else if (dDia.statusStr === 'Esqueceu Clock Out') statusBadge = '<span class="text-amber-600 font-bold">⚠️ Sem Out</span>';
                 else if (dDia.statusStr === 'Trabalhando') statusBadge = '<span class="text-emerald-500 font-bold">🟢 Trab</span>';
+                else if (dDia.statusStr === 'Sábado Opcional') statusBadge = '<span class="text-purple-600 font-bold">⚡ Sáb. Opcional</span>';
 
                 if (reg || dDia.statusStr === 'Falta' || dDia.statusStr === 'De Folga') {
-                    tbody.innerHTML += `<tr class="border-b border-slate-100 hover:bg-slate-50"><td class="p-3 sm:p-4 font-medium text-slate-600">${dataBR}</td><td class="p-3 sm:p-4 text-center font-mono">${dDia.inTimeStr}</td><td class="p-3 sm:p-4 text-center font-mono">${dDia.outTimeStr}</td><td class="p-3 sm:p-4 text-center text-red-600 font-bold">${dDia.atrasoMin > 0 ? dDia.atrasoMin + 'm' : '--'}</td><td class="p-3 sm:p-4 text-center text-blue-600 font-bold">${dDia.extraMin > 0 ? dDia.extraMin + 'm' : '--'}</td><td class="p-3 sm:p-4 text-center">${statusBadge}</td></tr>`;
+                    tbody.innerHTML += `<tr class="border-b border-slate-100 hover:bg-slate-50"><td class="p-3 sm:p-4 font-medium text-slate-600">${dataBR}</td><td class="p-3 sm:p-4 text-center font-mono">${dDia.inTimeStr}</td><td class="p-3 sm:p-4 text-center font-mono">${dDia.outTimeStr}</td><td class="p-3 sm:p-4 text-center text-red-600 font-bold">${dDia.atrasoMin > 0 ? dDia.atrasoMin + 'm' : '--'}</td><td class="p-3 sm:p-4 text-center text-blue-600 font-bold">${dDia.extraMin > 0 ? dDia.extraMin + 'm' : '--'}</td><td class="p-3 sm:p-4 text-center text-orange-600 font-bold">${dDia.faltaMin > 0 ? dDia.faltaMin + 'm' : '--'}</td><td class="p-3 sm:p-4 text-center">${statusBadge}</td></tr>`;
                 }
             }
-            if (tbody.innerHTML === '') tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-slate-500">Sem registros.</td></tr>';
+            if (tbody.innerHTML === '') tbody.innerHTML = '<tr><td colspan="7" class="p-8 text-center text-slate-500">Sem registros.</td></tr>';
 
             const resumoBox = document.getElementById('relatorio-resumo-box');
-            if (totalAtraso > 0 || totalExtra > 0) {
+            if (totalAtraso > 0 || totalExtra > 0 || totalFalta > 0) {
                 resumoBox.classList.remove('hidden'); resumoBox.classList.add('flex');
                 document.getElementById('relatorio-texto-atraso').textContent = formatarTempo(totalAtraso);
                 document.getElementById('relatorio-texto-extra').textContent = formatarTempo(totalExtra);
+                document.getElementById('relatorio-texto-faltante').textContent = formatarTempo(totalFalta);
             } else {
                 resumoBox.classList.remove('flex'); resumoBox.classList.add('hidden');
             }
-        } catch (err) { tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-red-500">Erro.</td></tr>'; }
+        } catch (err) { tbody.innerHTML = '<tr><td colspan="7" class="p-8 text-red-500">Erro.</td></tr>'; }
     };
 
     window.baixarRelatorioExcel = async function(idFuncionario, nomeFuncionario) {
         const mesAno = document.getElementById('ponto-mes-ano').value;
         if (!mesAno) return alert('Selecione um mês!');
+        if (typeof ExcelJS === 'undefined') return alert('Biblioteca Excel não carregou. Recarregue a página e tente novamente.');
         const [ano, mes] = mesAno.split('-');
         const primeiroDiaStr = `${ano}-${mes}-01`;
         const ultimoDiaNumero = new Date(Number(ano), Number(mes), 0).getDate();
@@ -851,53 +1046,37 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const { data: funcDados } = await window.bancoDeDados.from('funcionarios').select('*').eq('id', idFuncionario).single();
             const { data: registros } = await window.bancoDeDados.from('registros_ponto').select('*').eq('funcionario_id', idFuncionario).gte('data_registro', primeiroDiaStr).lte('data_registro', ultimoDiaStr);
-
-            let csv = '\uFEFF'; 
-            csv += `RELATÓRIO DE PONTO;${nomeFuncionario}\nMês Referência;${mesAno}\n`;
-            csv += `Horário Seg-Sex;${funcDados.horario_entrada || '08:00'} às ${funcDados.horario_saida || '17:00'}\n`;
-            csv += `Horário Sábado;${funcDados.horario_entrada_sabado || '07:00'} às ${funcDados.horario_saida_sabado || '12:00'}\n\n`;
-            csv += `Data;Entrada;Saída;Atraso;Hora Extra;Trabalhado;Status\n`;
-
-            let totalAtraso = 0, totalExtra = 0, totalTrabalhado = 0;
             const hojePT = window.obterHorarioPortugal();
+            const logoBase64 = await obterLogoBase64();
 
-            for (let d = 1; d <= ultimoDiaNumero; d++) {
-                const dataBR = `${String(d).padStart(2, '0')}/${mes}/${ano}`;
-                const reg = (registros || []).find(r => r.data_registro === `${ano}-${mes}-${String(d).padStart(2, '0')}`);
-                const dDia = calcularDadosDia(d, ano, mes, funcDados, reg, hojePT);
+            const wb = new ExcelJS.Workbook();
+            wb.creator = EMPRESA.nome;
+            const logoImgId = logoBase64 ? wb.addImage({ base64: logoBase64, extension: 'png' }) : null;
+            const ws = wb.addWorksheet('Relatório');
+            await preencherAbaFuncionario(wb, ws, funcDados, nomeFuncionario, mesAno, ano, mes, ultimoDiaNumero, registros, hojePT, logoImgId);
 
-                totalAtraso += dDia.atrasoMin;
-                totalExtra += dDia.extraMin;
-                totalTrabalhado += dDia.trabMin;
-
-                csv += `="${dataBR}";${dDia.inTimeStr};${dDia.outTimeStr};${formatarHoraMinSeg(dDia.atrasoMin)};${formatarHoraMinSeg(dDia.extraMin)};${formatarHoraMinSeg(dDia.trabMin)};${dDia.statusStr}\n`;
-            }
-
-            csv += `\nRESUMO\n`;
-            csv += `Total Atrasos:;${formatarHoraMinSeg(totalAtraso)}\n`;
-            csv += `Total Horas Extras:;${formatarHoraMinSeg(totalExtra)}\n`;
-            csv += `Total Trabalhado:;${formatarHoraMinSeg(totalTrabalhado)}\n`;
-
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const buffer = await wb.xlsx.writeBuffer();
+            const blob = new Blob([buffer], { type: 'application/octet-stream' });
             const link = document.createElement("a");
             const url = URL.createObjectURL(blob);
             link.setAttribute("href", url);
-            link.setAttribute("download", `Relatorio_${nomeFuncionario.replace(' ','_')}_${mesAno}.csv`);
+            link.setAttribute("download", `Relatorio_${nomeFuncionario.replace(/\s+/g, '_')}_${mesAno}.xlsx`);
             link.style.visibility = 'hidden';
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-        } catch (err) { alert('Erro ao gerar Excel.'); }
+            URL.revokeObjectURL(url);
+        } catch (err) { console.error(err); alert('Erro ao gerar Excel.'); }
     };
     // -------------------------------------------------------------------------
     // Relatório CONSOLIDADO: baixa TODOS os funcionários num único ficheiro
     // Excel (.xlsx), com uma aba por funcionário + uma aba de Resumo Geral.
-    // Usa a biblioteca SheetJS (XLSX), carregada via CDN no admin.html.
+    // Usa a biblioteca ExcelJS, carregada via CDN no admin.html.
     // -------------------------------------------------------------------------
     window.baixarRelatorioTodosExcel = async function() {
         const mesAno = document.getElementById('ponto-mes-ano').value;
         if (!mesAno) return alert('Selecione um mês!');
-        if (typeof XLSX === 'undefined') return alert('Biblioteca Excel não carregou. Recarregue a página e tente novamente.');
+        if (typeof ExcelJS === 'undefined') return alert('Biblioteca Excel não carregou. Recarregue a página e tente novamente.');
 
         const [ano, mes] = mesAno.split('-');
         const primeiroDiaStr = `${ano}-${mes}-01`;
@@ -913,62 +1092,122 @@ document.addEventListener('DOMContentLoaded', () => {
             const { data: registros } = await window.bancoDeDados.from('registros_ponto').select('*').gte('data_registro', primeiroDiaStr).lte('data_registro', ultimoDiaStr);
             if (!funcionarios || funcionarios.length === 0) { alert('Nenhum funcionário encontrado.'); return; }
 
-            const wb = XLSX.utils.book_new();
-            const resumoGeral = [['Funcionário', 'Horário Seg-Sex', 'Horário Sáb', 'Atrasos', 'Horas Extras', 'Trabalhado']];
-            let geralAtraso = 0, geralExtra = 0, geralTrabalhado = 0;
             const hojePT = window.obterHorarioPortugal();
+            const logoBase64 = await obterLogoBase64();
 
-            funcionarios.forEach(func => {
-                const horarioSegSex = `${func.horario_entrada || '08:00'}-${func.horario_saida || '17:00'}`;
-                const horarioSab = `${func.horario_entrada_sabado || '07:00'}-${func.horario_saida_sabado || '12:00'}`;
-                const dados = [
-                    [`RELATÓRIO DE PONTO - ${func.nome_completo}`],
-                    [`Mês Referência: ${mesAno}`],
-                    [`Horário Seg-Sex: ${func.horario_entrada || '08:00'} às ${func.horario_saida || '17:00'}`],
-                    [`Horário Sábado: ${func.horario_entrada_sabado || '07:00'} às ${func.horario_saida_sabado || '12:00'}`],
-                    [],
-                    ['Data', 'Entrada', 'Saída', 'Atraso', 'Hora Extra', 'Trabalhado', 'Status']
-                ];
-                let totalAtraso = 0, totalExtra = 0, totalTrabalhado = 0;
-                for (let d = 1; d <= ultimoDiaNumero; d++) {
-                    const dataISO = `${ano}-${mes}-${String(d).padStart(2, '0')}`;
-                    const dataBR = `${String(d).padStart(2, '0')}/${mes}/${ano}`;
-                    const reg = (registros || []).find(r => r.funcionario_id === func.id && r.data_registro === dataISO);
-                    
-                    const dDia = calcularDadosDia(d, ano, mes, func, reg, hojePT);
+            const wb = new ExcelJS.Workbook();
+            wb.creator = EMPRESA.nome;
+            // Imagem da logo é registada UMA única vez no workbook e reaproveitada
+            // em todas as abas (Resumo + cada funcionário) para não inflar o arquivo.
+            const logoImgId = logoBase64 ? wb.addImage({ base64: logoBase64, extension: 'png' }) : null;
 
-                    totalAtraso += dDia.atrasoMin;
-                    totalExtra += dDia.extraMin;
-                    totalTrabalhado += dDia.trabMin;
+            // Aba "Resumo Geral" — adicionada primeiro para ficar como a 1ª aba do arquivo.
+            const wsResumo = wb.addWorksheet('Resumo Geral');
+            wsResumo.columns = [{ width: 26 }, { width: 16 }, { width: 18 }, { width: 12 }, { width: 13 }, { width: 15 }, { width: 13 }];
 
-                    dados.push([dataBR, dDia.inTimeStr, dDia.outTimeStr, formatarHoraMinSeg(dDia.atrasoMin), formatarHoraMinSeg(dDia.extraMin), formatarHoraMinSeg(dDia.trabMin), dDia.statusStr]);
-                }
-                dados.push([]);
-                dados.push(['RESUMO']);
-                dados.push(['Total Atrasos:', formatarHoraMinSeg(totalAtraso)]);
-                dados.push(['Total Horas Extras:', formatarHoraMinSeg(totalExtra)]);
-                dados.push(['Total Trabalhado:', formatarHoraMinSeg(totalTrabalhado)]);
-                geralAtraso += totalAtraso; geralExtra += totalExtra; geralTrabalhado += totalTrabalhado;
+            if (logoImgId !== null) {
+                try {
+                    wsResumo.addImage(logoImgId, { tl: { col: 0, row: 0 }, ext: { width: 90, height: 61 } });
+                } catch (e) {}
+            }
+            wsResumo.mergeCells('B1:G1');
+            wsResumo.getCell('B1').value = EMPRESA.nome.toUpperCase();
+            wsResumo.getCell('B1').font = { bold: true, size: 16, color: { argb: EMPRESA.corMarca } };
+            wsResumo.getRow(1).height = 22;
+            wsResumo.mergeCells('B2:G2');
+            wsResumo.getCell('B2').value = EMPRESA.subtitulo;
+            wsResumo.getCell('B2').font = { italic: true, size: 10, color: { argb: 'FF64748B' } };
 
+            let linhaR = 3;
+            if (EMPRESA.endereco) {
+                wsResumo.mergeCells(`B${linhaR}:G${linhaR}`);
+                wsResumo.getCell(`B${linhaR}`).value = EMPRESA.endereco;
+                wsResumo.getCell(`B${linhaR}`).font = { size: 9, color: { argb: 'FF64748B' } };
+                linhaR++;
+            }
+            linhaR = Math.max(linhaR + 1, 5);
+
+            wsResumo.mergeCells(`A${linhaR}:G${linhaR}`);
+            wsResumo.getCell(`A${linhaR}`).value = `RESUMO GERAL — ${mesAno}`;
+            wsResumo.getCell(`A${linhaR}`).font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
+            wsResumo.getCell(`A${linhaR}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: EMPRESA.corMarca } };
+            wsResumo.getCell(`A${linhaR}`).alignment = { vertical: 'middle', indent: 1 };
+            wsResumo.getRow(linhaR).height = 20;
+            linhaR += 2;
+
+            const headerRowNum = linhaR;
+            const headersResumo = ['Funcionário', 'Horário Seg-Sex', 'Horário Sáb (Extra)', 'Atrasos', 'Horas Extras', 'Horas Faltantes', 'Trabalhado'];
+            headersResumo.forEach((h, i) => {
+                const cell = wsResumo.getRow(headerRowNum).getCell(i + 1);
+                cell.value = h;
+                cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+                cell.alignment = { horizontal: 'center', vertical: 'middle' };
+            });
+            wsResumo.getRow(headerRowNum).height = 20;
+            linhaR++;
+
+            let geralAtraso = 0, geralExtra = 0, geralTrabalhado = 0, geralFalta = 0;
+            const nomesUsados = new Set();
+
+            for (const func of funcionarios) {
                 let nomeAba = func.nome_completo.substring(0, 28).replace(/[\\\/\?\*\[\]:]/g, '');
                 if (!nomeAba) nomeAba = `Func_${func.id}`;
                 let sufixo = ''; let n = 2;
-                while (wb.SheetNames.includes(nomeAba + sufixo)) { sufixo = '_' + n; n++; }
-                const ws = XLSX.utils.aoa_to_sheet(dados);
-                XLSX.utils.book_append_sheet(wb, ws, nomeAba + sufixo);
-                resumoGeral.push([func.nome_completo, horarioSegSex, horarioSab, formatarHoraMinSeg(totalAtraso), formatarHoraMinSeg(totalExtra), formatarHoraMinSeg(totalTrabalhado)]);
-            });
+                while (nomesUsados.has(nomeAba + sufixo)) { sufixo = '_' + n; n++; }
+                nomesUsados.add(nomeAba + sufixo);
 
-            // Totalização do mês inteiro: soma as horas de TODOS os funcionários.
-            resumoGeral.push([]);
-            resumoGeral.push(['TOTAL GERAL', '', '', formatarHoraMinSeg(geralAtraso), formatarHoraMinSeg(geralExtra), formatarHoraMinSeg(geralTrabalhado)]);
+                const wsFunc = wb.addWorksheet(nomeAba + sufixo);
+                const totais = await preencherAbaFuncionario(wb, wsFunc, func, func.nome_completo, mesAno, ano, mes, ultimoDiaNumero, registros, hojePT, logoImgId);
 
-            const wsResumo = XLSX.utils.aoa_to_sheet(resumoGeral);
-            XLSX.utils.book_append_sheet(wb, wsResumo, 'Resumo Geral');
-            wb.SheetNames.splice(wb.SheetNames.indexOf('Resumo Geral'), 1);
-            wb.SheetNames.unshift('Resumo Geral');
+                geralAtraso += totais.totalAtraso;
+                geralExtra += totais.totalExtra;
+                geralTrabalhado += totais.totalTrabalhado;
+                geralFalta += totais.totalFalta;
 
-            XLSX.writeFile(wb, `Relatorio_Todos_${mesAno}.xlsx`);
+                const horarioSegSex = `${func.horario_entrada || '08:00'}-${func.horario_saida || '17:00'}`;
+                const horarioSab = `${func.horario_entrada_sabado || '07:00'}-${func.horario_saida_sabado || '12:00'}`;
+                const row = wsResumo.getRow(linhaR);
+                row.getCell(1).value = func.nome_completo;
+                row.getCell(2).value = horarioSegSex;
+                row.getCell(3).value = horarioSab;
+                row.getCell(4).value = formatarHoraMinSeg(totais.totalAtraso);
+                row.getCell(5).value = formatarHoraMinSeg(totais.totalExtra);
+                row.getCell(6).value = formatarHoraMinSeg(totais.totalFalta);
+                row.getCell(7).value = formatarHoraMinSeg(totais.totalTrabalhado);
+                row.getCell(6).font = { color: { argb: 'FFD97706' }, bold: totais.totalFalta > 0 };
+                if ((linhaR - headerRowNum) % 2 === 0) {
+                    for (let c = 1; c <= 7; c++) row.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+                }
+                linhaR++;
+            }
+
+            linhaR++;
+            const totalRow = wsResumo.getRow(linhaR);
+            totalRow.getCell(1).value = 'TOTAL GERAL';
+            totalRow.getCell(4).value = formatarHoraMinSeg(geralAtraso);
+            totalRow.getCell(5).value = formatarHoraMinSeg(geralExtra);
+            totalRow.getCell(6).value = formatarHoraMinSeg(geralFalta);
+            totalRow.getCell(7).value = formatarHoraMinSeg(geralTrabalhado);
+            for (let c = 1; c <= 7; c++) {
+                totalRow.getCell(c).font = { bold: true };
+                totalRow.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+                totalRow.getCell(c).border = { top: { style: 'medium' } };
+            }
+
+            wsResumo.views = [{ state: 'frozen', ySplit: headerRowNum }];
+
+            const buffer = await wb.xlsx.writeBuffer();
+            const blob = new Blob([buffer], { type: 'application/octet-stream' });
+            const link = document.createElement("a");
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            link.setAttribute("download", `Relatorio_Todos_${mesAno}.xlsx`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
         } catch (err) {
             console.error(err);
             alert('Erro ao gerar o relatório de todos.');
