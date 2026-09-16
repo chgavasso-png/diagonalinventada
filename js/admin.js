@@ -27,6 +27,47 @@ async function obterLogoBase64() {
     return _logoBase64Cache;
 }
 
+// -------------------------------------------------------------------------
+// Salva um Blob (usado para os relatórios em .xlsx) como arquivo para o
+// usuário. Dentro dos apps nativos (Android/iOS que embrulham este site numa
+// WebView), o clique num link <a download> com uma blob: URL normalmente não
+// faz nada — por isso, quando a ponte JS do app está presente, entregamos o
+// arquivo em base64 para o lado nativo salvar. No navegador comum, mantém o
+// comportamento padrão de sempre.
+// -------------------------------------------------------------------------
+async function salvarArquivoBlob(blob, nomeArquivo) {
+    if (window.AndroidDownloadBridge && window.AndroidDownloadBridge.saveBase64File) {
+        const base64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+        window.AndroidDownloadBridge.saveBase64File(base64, nomeArquivo, blob.type || 'application/octet-stream');
+        return;
+    }
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.iosDownloadBridge) {
+        const base64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+        window.webkit.messageHandlers.iosDownloadBridge.postMessage({ base64, filename: nomeArquivo, mimeType: blob.type || 'application/octet-stream' });
+        return;
+    }
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = nomeArquivo;
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
 
     // Verificação de Segurança
@@ -1148,15 +1189,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const buffer = await wb.xlsx.writeBuffer();
             const blob = new Blob([buffer], { type: 'application/octet-stream' });
-            const link = document.createElement("a");
-            const url = URL.createObjectURL(blob);
-            link.setAttribute("href", url);
-            link.setAttribute("download", `Relatorio_${nomeFuncionario.replace(/\s+/g, '_')}_${mesAno}.xlsx`);
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
+            await salvarArquivoBlob(blob, `Relatorio_${nomeFuncionario.replace(/\s+/g, '_')}_${mesAno}.xlsx`);
         } catch (err) { console.error(err); alert('Erro ao gerar Excel.'); }
     };
     // -------------------------------------------------------------------------
@@ -1290,15 +1323,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const buffer = await wb.xlsx.writeBuffer();
             const blob = new Blob([buffer], { type: 'application/octet-stream' });
-            const link = document.createElement("a");
-            const url = URL.createObjectURL(blob);
-            link.setAttribute("href", url);
-            link.setAttribute("download", `Relatorio_Todos_${mesAno}.xlsx`);
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
+            await salvarArquivoBlob(blob, `Relatorio_Todos_${mesAno}.xlsx`);
         } catch (err) {
             console.error(err);
             alert('Erro ao gerar o relatório de todos.');
