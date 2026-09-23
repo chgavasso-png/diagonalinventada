@@ -908,12 +908,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 const [hE, mE] = hEntradaOficial.split(':').map(Number);
                 const diffE = inPT.minutosDoDia - (hE * 60 + mE);
                 if (diffE > 5) atrasoMin = diffE;
+                // Chegar antes do horário também é hora extra.
+                if (diffE < -5) extraMin += -diffE;
             }
             if (outPT) {
                 outTimeStr = outPT.horaFormatada;
                 const [hS, mS] = hSaidaOficial.split(':').map(Number);
                 const diffS = outPT.minutosDoDia - (hS * 60 + mS);
-                if (diffS > 5) extraMin = diffS;
+                if (diffS > 5) extraMin += diffS;
                 if (inPT) {
                     const totalMin = (new Date(reg.clock_out) - new Date(reg.clock_in)) / 60000;
                     let almoco = 0;
