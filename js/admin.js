@@ -559,6 +559,198 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // -------------------------------------------------------------------------
+    // HORA EXTRA: lançamentos manuais categorizados (Pós-expediente, Noturno,
+    // Feriado, Fim de Semana), guardados em tabela própria (horas_extras),
+    // separada do ponto normal. Usam timestamp completo (inicio/fim) para que
+    // um turno que atravessa a meia-noite (ex.: 22h às 06h) não dependa de
+    // comparação com horário oficial nenhum — é só a diferença entre dois
+    // instantes.
+    // -------------------------------------------------------------------------
+    let _feriadosCache = null;
+    async function carregarFeriados(forcar) {
+        if (_feriadosCache && !forcar) return _feriadosCache;
+        const { data } = await window.bancoDeDados.from('feriados').select('*').order('data');
+        _feriadosCache = data || [];
+        return _feriadosCache;
+    }
+
+    function proximoDiaISO(dataISO) {
+        const [ano, mes, dia] = dataISO.split('-').map(Number);
+        const d = new Date(ano, mes - 1, dia + 1, 12, 0, 0);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
+    // Sugere a categoria com base em: feriado cadastrado > fim de semana >
+    // janela noturna (22h-06h) > pós-expediente. O admin sempre pode trocar.
+    function sugerirCategoriaHoraExtra(dataISO, horaInicioStr) {
+        const feriados = _feriadosCache || [];
+        if (feriados.some(f => f.data === dataISO)) return 'feriado';
+        const [ano, mes, dia] = dataISO.split('-').map(Number);
+        const diaSemana = new Date(ano, mes - 1, dia, 12, 0, 0).getDay();
+        if (diaSemana === 0 || diaSemana === 6) return 'fim_de_semana';
+        const [h] = (horaInicioStr || '00:00').split(':').map(Number);
+        if (h >= 22 || h < 6) return 'noturno';
+        return 'pos_expediente';
+    }
+
+    const LABELS_CATEGORIA_EXTRA = {
+        pos_expediente: ['Pós-expediente', 'bg-slate-100 text-slate-700'],
+        noturno: ['Noturno', 'bg-indigo-100 text-indigo-700'],
+        feriado: ['Feriado', 'bg-rose-100 text-rose-700'],
+        fim_de_semana: ['Fim de Semana', 'bg-amber-100 text-amber-700']
+    };
+
+    async function renderListaHorasExtras(funcId, dataISO) {
+        const lista = document.getElementById('he-lista');
+        lista.innerHTML = '<p class="text-xs text-slate-400 text-center py-2">Carregando...</p>';
+        const { data } = await window.bancoDeDados.from('horas_extras').select('*').eq('funcionario_id', funcId).eq('data_registro', dataISO).order('inicio');
+        if (!data || data.length === 0) { lista.innerHTML = '<p class="text-xs text-slate-400 text-center py-2">Nenhum período lançado neste dia.</p>'; return; }
+        lista.innerHTML = data.map(h => {
+            const ini = window.converterTimestampPortugal(h.inicio);
+            const fim = window.converterTimestampPortugal(h.fim);
+            const [label, cor] = LABELS_CATEGORIA_EXTRA[h.categoria] || [h.categoria, 'bg-slate-100 text-slate-700'];
+            const dur = Math.round((new Date(h.fim) - new Date(h.inicio)) / 60000);
+            const horas = Math.floor(dur / 60), min = dur % 60;
+            return `<div class="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span class="font-mono font-bold text-sm text-slate-700">${ini ? ini.horaFormatada.slice(0,5) : '--:--'} – ${fim ? fim.horaFormatada.slice(0,5) : '--:--'}</span>
+                    <span class="text-xs font-bold px-2 py-0.5 rounded-full ${cor}">${label}</span>
+                    <span class="text-xs text-slate-400">${horas}h${String(min).padStart(2,'0')}</span>
+                </div>
+                <button onclick="excluirHoraExtra('${h.id}')" class="text-red-500 hover:bg-red-100 p-1 rounded text-xs font-bold">🗑️</button>
+            </div>`;
+        }).join('');
+    }
+
+    window.abrirModalHoraExtra = async function(funcId, nomeFuncionario, dataISO) {
+        document.getElementById('he-func-id').value = funcId;
+        document.getElementById('he-subtitulo').textContent = `${nomeFuncionario} — ${dataISO.split('-').reverse().join('/')}`;
+        document.getElementById('he-data').value = dataISO;
+        document.getElementById('he-hora-inicio').value = '';
+        document.getElementById('he-hora-fim').value = '';
+        document.getElementById('he-atravessa-meia-noite').checked = false;
+        document.getElementById('he-observacao').value = '';
+        document.getElementById('he-erro').classList.add('hidden');
+        await carregarFeriados();
+        document.getElementById('he-categoria').value = sugerirCategoriaHoraExtra(dataISO, '22:00');
+        await renderListaHorasExtras(funcId, dataISO);
+        document.getElementById('modal-hora-extra').classList.replace('hidden', 'flex');
+    };
+
+    window.excluirHoraExtra = async function(id) {
+        if (!confirm('Excluir este lançamento de hora extra?')) return;
+        await window.bancoDeDados.from('horas_extras').delete().eq('id', id);
+        const funcId = document.getElementById('he-func-id').value;
+        const dataISO = document.getElementById('he-data').value;
+        await renderListaHorasExtras(funcId, dataISO);
+        carregarGestaoDia();
+    };
+
+    const inputHeData = document.getElementById('he-data');
+    const inputHeHoraInicio = document.getElementById('he-hora-inicio');
+    function atualizarSugestaoCategoriaExtra() {
+        const dataISO = inputHeData.value;
+        const horaInicio = inputHeHoraInicio.value;
+        if (!dataISO || !horaInicio) return;
+        document.getElementById('he-categoria').value = sugerirCategoriaHoraExtra(dataISO, horaInicio);
+    }
+    if (inputHeData) inputHeData.addEventListener('change', atualizarSugestaoCategoriaExtra);
+    if (inputHeHoraInicio) inputHeHoraInicio.addEventListener('change', atualizarSugestaoCategoriaExtra);
+
+    const formHoraExtra = document.getElementById('form-hora-extra');
+    if (formHoraExtra) {
+        formHoraExtra.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const erroEl = document.getElementById('he-erro');
+            erroEl.classList.add('hidden');
+            const funcId = document.getElementById('he-func-id').value;
+            const dataISO = document.getElementById('he-data').value;
+            const horaInicio = document.getElementById('he-hora-inicio').value;
+            const horaFim = document.getElementById('he-hora-fim').value;
+            const atravessa = document.getElementById('he-atravessa-meia-noite').checked;
+            const categoria = document.getElementById('he-categoria').value;
+            const observacao = document.getElementById('he-observacao').value.trim() || null;
+
+            const dataFim = atravessa ? proximoDiaISO(dataISO) : dataISO;
+            const inicioTS = window.comporTimestampPortugal(dataISO, horaInicio);
+            const fimTS = window.comporTimestampPortugal(dataFim, horaFim);
+
+            if (new Date(fimTS) <= new Date(inicioTS)) {
+                erroEl.textContent = 'O fim precisa ser depois do início. Se o turno vira o dia, marque "Terminou no dia seguinte".';
+                erroEl.classList.remove('hidden');
+                return;
+            }
+
+            try {
+                const { error: erroInsert } = await window.bancoDeDados.from('horas_extras').insert([{
+                    funcionario_id: funcId, data_registro: dataISO, inicio: inicioTS, fim: fimTS,
+                    categoria, observacao, inserido_por_admin: true
+                }]);
+                if (erroInsert) throw erroInsert;
+                document.getElementById('he-hora-inicio').value = '';
+                document.getElementById('he-hora-fim').value = '';
+                document.getElementById('he-atravessa-meia-noite').checked = false;
+                document.getElementById('he-observacao').value = '';
+                await renderListaHorasExtras(funcId, dataISO);
+                carregarGestaoDia();
+            } catch (err) {
+                erroEl.textContent = 'Erro ao salvar. Verifique se a tabela "horas_extras" já existe no banco (rode o supabase_schema.sql).';
+                erroEl.classList.remove('hidden');
+            }
+        });
+    }
+
+    async function renderListaFeriados() {
+        const ul = document.getElementById('fer-lista-feriados');
+        const feriados = await carregarFeriados(true);
+        if (feriados.length === 0) { ul.innerHTML = '<li class="text-slate-400 text-center py-2">Nenhum feriado cadastrado.</li>'; return; }
+        ul.innerHTML = feriados.map(f => `<li class="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded px-3 py-1.5">
+            <span class="font-mono font-bold text-slate-700">${f.data.split('-').reverse().join('/')}</span>
+            <span class="flex-1 text-slate-600 truncate">${f.nome || ''}</span>
+            <button onclick="excluirFeriado('${f.id}')" class="text-red-500 hover:bg-red-100 p-1 rounded text-xs font-bold">🗑️</button>
+        </li>`).join('');
+    }
+
+    window.abrirModalFeriados = async function() {
+        await renderListaFeriados();
+        document.getElementById('modal-feriados').classList.replace('hidden', 'flex');
+    };
+
+    window.excluirFeriado = async function(id) {
+        if (!confirm('Excluir este feriado?')) return;
+        await window.bancoDeDados.from('feriados').delete().eq('id', id);
+        await renderListaFeriados();
+    };
+
+    const formAddFeriado = document.getElementById('form-add-feriado');
+    if (formAddFeriado) {
+        formAddFeriado.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const data = document.getElementById('fer-nova-data').value;
+            const nome = document.getElementById('fer-novo-nome').value.trim() || null;
+            if (!data) return;
+            try {
+                const { error: erroInsert } = await window.bancoDeDados.from('feriados').insert([{ data, nome }]);
+                if (erroInsert) throw erroInsert;
+                document.getElementById('fer-nova-data').value = '';
+                document.getElementById('fer-novo-nome').value = '';
+                await renderListaFeriados();
+            } catch (err) { alert('Erro ao salvar feriado (a data já deve estar cadastrada).'); }
+        });
+    }
+
+    // Soma, em minutos, as horas_extras de um funcionário num intervalo de
+    // datas, quebrado por categoria. Usado nos relatórios (tela e Excel).
+    function somarHorasExtrasPorCategoria(extras, funcId) {
+        const totais = { pos_expediente: 0, noturno: 0, feriado: 0, fim_de_semana: 0 };
+        (extras || []).filter(h => String(h.funcionario_id) === String(funcId)).forEach(h => {
+            const min = (new Date(h.fim) - new Date(h.inicio)) / 60000;
+            if (totais.hasOwnProperty(h.categoria)) totais[h.categoria] += min;
+        });
+        return totais;
+    }
+
     function renderLinhaGestao(func, reg, diaSemanaIndex, ehHoje, ehPassado, hojePT) {
         let horarioPrevisto = '', hSaidaOficial = '17:00';
         if (diaSemanaIndex === 0) horarioPrevisto = 'Folga Semanal (Dom)';
@@ -646,7 +838,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 btns += info.stOriginal === 'folga' ? `<button onclick="definirStatusDia('${func.id}','${dataISO}','normal')" class="text-xs bg-slate-200 text-slate-700 font-bold px-2 py-1 rounded">Normal</button>` : `<button onclick="definirStatusDia('${func.id}','${dataISO}','folga')" class="text-xs bg-blue-600 text-white font-bold px-2 py-1 rounded">😴 Folga</button>`;
                 btns += info.stOriginal === 'falta' ? `<button onclick="definirStatusDia('${func.id}','${dataISO}','normal')" class="text-xs bg-slate-200 text-slate-700 font-bold px-2 py-1 rounded">Normal</button>` : `<button onclick="definirStatusDia('${func.id}','${dataISO}','falta')" class="text-xs bg-red-600 text-white font-bold px-2 py-1 rounded">❌ Falta</button>`;
                 if (reg && reg.clock_in && !reg.clock_out) btns += `<button onclick="forcarClockOutGestao('${func.id}','${dataISO}','${info.hSaidaOficial}')" class="text-xs bg-purple-600 text-white font-bold px-2 py-1 rounded">⚡ Out</button>`;
-                btns += `<button onclick="abrirModalPontoGestao(['${func.id}'])" class="text-xs bg-slate-800 text-white font-bold px-2 py-1 rounded">✏️ Ponto</button></div>`;
+                btns += `<button onclick="abrirModalPontoGestao(['${func.id}'])" class="text-xs bg-slate-800 text-white font-bold px-2 py-1 rounded">✏️ Ponto</button>`;
+                btns += `<button onclick="abrirModalHoraExtra('${func.id}', '${func.nome_completo.replace(/'/g, "\\'")}', '${dataISO}')" class="text-xs bg-blue-600 text-white font-bold px-2 py-1 rounded">⚡ Hora Extra</button></div>`;
 
                 const foto = func.foto_url || 'https://via.placeholder.com/150';
                 tbody.innerHTML += `<tr class="border-b border-slate-100 hover:bg-slate-50"><td class="p-3 sm:p-4 text-center"><input type="checkbox" class="gd-check-item w-4 h-4 rounded border-slate-300 text-orange-500 focus:ring-orange-500 cursor-pointer" value="${func.id}"></td><td class="p-3 sm:p-4 flex items-center gap-3"><img src="${foto}" class="w-8 h-8 rounded-full object-cover"><div><p class="font-bold text-slate-800 text-sm">${func.nome_completo}</p></div></td><td class="p-3 sm:p-4 text-center text-xs text-slate-600">${info.horarioPrevisto}</td><td class="p-3 sm:p-4 text-center text-xs font-bold text-emerald-600 font-mono">${info.inTimeStr}</td><td class="p-3 sm:p-4 text-center text-xs font-bold text-orange-600 font-mono">${info.outTimeStr}</td><td class="p-3 sm:p-4 text-center">${info.badgeStatus}</td><td class="p-3 sm:p-4 text-center">${btns}</td></tr>`;
@@ -980,7 +1173,7 @@ document.addEventListener('DOMContentLoaded', () => {
         'Aguardando': 'FF94A3B8', 'Vazio': 'FF94A3B8'
     };
 
-    async function preencherAbaFuncionario(wb, ws, func, nomeCompleto, mesAno, ano, mes, ultimoDiaNumero, registros, hojePT, logoImgId) {
+    async function preencherAbaFuncionario(wb, ws, func, nomeCompleto, mesAno, ano, mes, ultimoDiaNumero, registros, hojePT, logoImgId, extras) {
         ws.columns = [
             { width: 13 }, { width: 11 }, { width: 11 }, { width: 11 },
             { width: 13 }, { width: 13 }, { width: 13 }, { width: 18 }
@@ -1101,9 +1294,63 @@ document.addEventListener('DOMContentLoaded', () => {
             linha++;
         });
 
+        // ---------------------------------------------------------------
+        // HORA EXTRA POR CATEGORIA (lançamentos manuais da tabela horas_extras,
+        // separados do cálculo automático de atraso/extra acima).
+        // ---------------------------------------------------------------
+        const extrasFunc = (extras || []).filter(h => String(h.funcionario_id) === String(func.id));
+        const catTotais = somarHorasExtrasPorCategoria(extrasFunc, func.id);
+
+        linha++;
+        ws.mergeCells(`A${linha}:H${linha}`);
+        ws.getCell(`A${linha}`).value = 'HORA EXTRA POR CATEGORIA';
+        ws.getCell(`A${linha}`).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        ws.getCell(`A${linha}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+        ws.getCell(`A${linha}`).alignment = { vertical: 'middle', indent: 1 };
+        linha++;
+
+        const categoriaLinhas = [
+            ['Pós-expediente:', formatarHoraMinSeg(catTotais.pos_expediente)],
+            ['Noturno:', formatarHoraMinSeg(catTotais.noturno)],
+            ['Feriado:', formatarHoraMinSeg(catTotais.feriado)],
+            ['Fim de Semana:', formatarHoraMinSeg(catTotais.fim_de_semana)],
+        ];
+        categoriaLinhas.forEach(([label, valor]) => {
+            ws.getCell(`A${linha}`).value = label;
+            ws.getCell(`A${linha}`).font = { bold: true, size: 10 };
+            ws.getCell(`B${linha}`).value = valor;
+            ws.getCell(`B${linha}`).font = { bold: true, size: 10, color: { argb: 'FF2563EB' } };
+            linha++;
+        });
+
+        if (extrasFunc.length > 0) {
+            linha++;
+            ws.mergeCells(`A${linha}:H${linha}`);
+            ws.getCell(`A${linha}`).value = 'LANÇAMENTOS DE HORA EXTRA';
+            ws.getCell(`A${linha}`).font = { bold: true, size: 9, color: { argb: 'FF475569' } };
+            linha++;
+            const headersExtra = ['Data', 'Início', 'Fim', 'Categoria', 'Duração', 'Observação'];
+            headersExtra.forEach((h, i) => { ws.getCell(linha, i + 1).value = h; ws.getCell(linha, i + 1).font = { bold: true, size: 9 }; });
+            linha++;
+            extrasFunc.sort((a, b) => new Date(a.inicio) - new Date(b.inicio)).forEach(h => {
+                const ini = window.converterTimestampPortugal(h.inicio);
+                const fim = window.converterTimestampPortugal(h.fim);
+                const dur = Math.round((new Date(h.fim) - new Date(h.inicio)) / 60000);
+                const row = ws.getRow(linha);
+                row.getCell(1).value = h.data_registro.split('-').reverse().join('/');
+                row.getCell(2).value = ini ? ini.horaFormatada.slice(0, 5) : '--:--';
+                row.getCell(3).value = fim ? fim.horaFormatada.slice(0, 5) : '--:--';
+                row.getCell(4).value = (LABELS_CATEGORIA_EXTRA[h.categoria] || [h.categoria])[0];
+                row.getCell(5).value = formatarHoraMinSeg(dur);
+                row.getCell(6).value = h.observacao || '';
+                for (let c = 1; c <= 6; c++) row.getCell(c).font = { size: 9 };
+                linha++;
+            });
+        }
+
         ws.views = [{ state: 'frozen', ySplit: linhaHeaderTabela }];
 
-        return { totalAtraso, totalExtra, totalTrabalhado, totalFalta };
+        return { totalAtraso, totalExtra, totalTrabalhado, totalFalta, ...catTotais };
     }
 
     window.abrirRelatorioTela = async function(idFuncionario, nomeFuncionario) {
@@ -1123,6 +1370,19 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const { data: funcDados } = await window.bancoDeDados.from('funcionarios').select('*').eq('id', idFuncionario).single();
             const { data: registros } = await window.bancoDeDados.from('registros_ponto').select('*').eq('funcionario_id', idFuncionario).gte('data_registro', primeiroDiaStr).lte('data_registro', ultimoDiaStr);
+            const { data: extras } = await window.bancoDeDados.from('horas_extras').select('*').eq('funcionario_id', idFuncionario).gte('data_registro', primeiroDiaStr).lte('data_registro', ultimoDiaStr);
+
+            const extrasCategoria = somarHorasExtrasPorCategoria(extras, idFuncionario);
+            const boxExtrasCategoria = document.getElementById('relatorio-extras-categoria-box');
+            const temExtrasCategoria = Object.values(extrasCategoria).some(v => v > 0);
+            if (boxExtrasCategoria) {
+                boxExtrasCategoria.classList.toggle('hidden', !temExtrasCategoria);
+                boxExtrasCategoria.classList.toggle('flex', temExtrasCategoria);
+                document.getElementById('relatorio-texto-pos-expediente').textContent = formatarTempo(extrasCategoria.pos_expediente);
+                document.getElementById('relatorio-texto-noturno').textContent = formatarTempo(extrasCategoria.noturno);
+                document.getElementById('relatorio-texto-feriado').textContent = formatarTempo(extrasCategoria.feriado);
+                document.getElementById('relatorio-texto-fim-semana').textContent = formatarTempo(extrasCategoria.fim_de_semana);
+            }
 
             document.getElementById('relatorio-tela-mes').textContent = `Período: ${mesAno} | Seg-Sex: ${funcDados.horario_entrada || '08:00'}-${funcDados.horario_saida || '17:00'} | Sáb: ${funcDados.horario_entrada_sabado || '07:00'}-${funcDados.horario_saida_sabado || '12:00'}`;
             tbody.innerHTML = '';
@@ -1180,6 +1440,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const { data: funcDados } = await window.bancoDeDados.from('funcionarios').select('*').eq('id', idFuncionario).single();
             const { data: registros } = await window.bancoDeDados.from('registros_ponto').select('*').eq('funcionario_id', idFuncionario).gte('data_registro', primeiroDiaStr).lte('data_registro', ultimoDiaStr);
+            const { data: extras } = await window.bancoDeDados.from('horas_extras').select('*').eq('funcionario_id', idFuncionario).gte('data_registro', primeiroDiaStr).lte('data_registro', ultimoDiaStr);
             const hojePT = window.obterHorarioPortugal();
             const logoBase64 = await obterLogoBase64();
 
@@ -1187,7 +1448,7 @@ document.addEventListener('DOMContentLoaded', () => {
             wb.creator = EMPRESA.nome;
             const logoImgId = logoBase64 ? wb.addImage({ base64: logoBase64, extension: 'png' }) : null;
             const ws = wb.addWorksheet('Relatório');
-            await preencherAbaFuncionario(wb, ws, funcDados, nomeFuncionario, mesAno, ano, mes, ultimoDiaNumero, registros, hojePT, logoImgId);
+            await preencherAbaFuncionario(wb, ws, funcDados, nomeFuncionario, mesAno, ano, mes, ultimoDiaNumero, registros, hojePT, logoImgId, extras);
 
             const buffer = await wb.xlsx.writeBuffer();
             const blob = new Blob([buffer], { type: 'application/octet-stream' });
@@ -1216,6 +1477,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const { data: funcionarios } = await window.bancoDeDados.from('funcionarios').select('*').order('nome_completo');
             const { data: registros } = await window.bancoDeDados.from('registros_ponto').select('*').gte('data_registro', primeiroDiaStr).lte('data_registro', ultimoDiaStr);
+            const { data: extras } = await window.bancoDeDados.from('horas_extras').select('*').gte('data_registro', primeiroDiaStr).lte('data_registro', ultimoDiaStr);
             if (!funcionarios || funcionarios.length === 0) { alert('Nenhum funcionário encontrado.'); return; }
 
             const hojePT = window.obterHorarioPortugal();
@@ -1229,31 +1491,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Aba "Resumo Geral" — adicionada primeiro para ficar como a 1ª aba do arquivo.
             const wsResumo = wb.addWorksheet('Resumo Geral');
-            wsResumo.columns = [{ width: 26 }, { width: 16 }, { width: 18 }, { width: 12 }, { width: 13 }, { width: 15 }, { width: 13 }];
+            wsResumo.columns = [{ width: 26 }, { width: 16 }, { width: 18 }, { width: 12 }, { width: 13 }, { width: 13 }, { width: 11 }, { width: 11 }, { width: 13 }, { width: 15 }, { width: 13 }];
 
             if (logoImgId !== null) {
                 try {
                     wsResumo.addImage(logoImgId, { tl: { col: 0, row: 0 }, ext: { width: 90, height: 61 } });
                 } catch (e) {}
             }
-            wsResumo.mergeCells('B1:G1');
+            wsResumo.mergeCells('B1:K1');
             wsResumo.getCell('B1').value = EMPRESA.nome.toUpperCase();
             wsResumo.getCell('B1').font = { bold: true, size: 16, color: { argb: EMPRESA.corMarca } };
             wsResumo.getRow(1).height = 22;
-            wsResumo.mergeCells('B2:G2');
+            wsResumo.mergeCells('B2:K2');
             wsResumo.getCell('B2').value = EMPRESA.subtitulo;
             wsResumo.getCell('B2').font = { italic: true, size: 10, color: { argb: 'FF64748B' } };
 
             let linhaR = 3;
             if (EMPRESA.endereco) {
-                wsResumo.mergeCells(`B${linhaR}:G${linhaR}`);
+                wsResumo.mergeCells(`B${linhaR}:K${linhaR}`);
                 wsResumo.getCell(`B${linhaR}`).value = EMPRESA.endereco;
                 wsResumo.getCell(`B${linhaR}`).font = { size: 9, color: { argb: 'FF64748B' } };
                 linhaR++;
             }
             linhaR = Math.max(linhaR + 1, 5);
 
-            wsResumo.mergeCells(`A${linhaR}:G${linhaR}`);
+            wsResumo.mergeCells(`A${linhaR}:K${linhaR}`);
             wsResumo.getCell(`A${linhaR}`).value = `RESUMO GERAL — ${mesAno}`;
             wsResumo.getCell(`A${linhaR}`).font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
             wsResumo.getCell(`A${linhaR}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: EMPRESA.corMarca } };
@@ -1262,7 +1524,7 @@ document.addEventListener('DOMContentLoaded', () => {
             linhaR += 2;
 
             const headerRowNum = linhaR;
-            const headersResumo = ['Funcionário', 'Horário Seg-Sex', 'Horário Sáb (Extra)', 'Atrasos', 'Horas Extras', 'Horas Faltantes', 'Trabalhado'];
+            const headersResumo = ['Funcionário', 'Horário Seg-Sex', 'Horário Sáb (Extra)', 'Atrasos', 'Horas Extras', 'Pós-expediente', 'Noturno', 'Feriado', 'Fim de Semana', 'Horas Faltantes', 'Trabalhado'];
             headersResumo.forEach((h, i) => {
                 const cell = wsResumo.getRow(headerRowNum).getCell(i + 1);
                 cell.value = h;
@@ -1274,6 +1536,7 @@ document.addEventListener('DOMContentLoaded', () => {
             linhaR++;
 
             let geralAtraso = 0, geralExtra = 0, geralTrabalhado = 0, geralFalta = 0;
+            let geralPosExpediente = 0, geralNoturno = 0, geralFeriado = 0, geralFimDeSemana = 0;
             const nomesUsados = new Set();
 
             for (const func of funcionarios) {
@@ -1284,12 +1547,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 nomesUsados.add(nomeAba + sufixo);
 
                 const wsFunc = wb.addWorksheet(nomeAba + sufixo);
-                const totais = await preencherAbaFuncionario(wb, wsFunc, func, func.nome_completo, mesAno, ano, mes, ultimoDiaNumero, registros, hojePT, logoImgId);
+                const totais = await preencherAbaFuncionario(wb, wsFunc, func, func.nome_completo, mesAno, ano, mes, ultimoDiaNumero, registros, hojePT, logoImgId, extras);
 
                 geralAtraso += totais.totalAtraso;
                 geralExtra += totais.totalExtra;
                 geralTrabalhado += totais.totalTrabalhado;
                 geralFalta += totais.totalFalta;
+                geralPosExpediente += totais.pos_expediente;
+                geralNoturno += totais.noturno;
+                geralFeriado += totais.feriado;
+                geralFimDeSemana += totais.fim_de_semana;
 
                 const horarioSegSex = `${func.horario_entrada || '08:00'}-${func.horario_saida || '17:00'}`;
                 const horarioSab = `${func.horario_entrada_sabado || '07:00'}-${func.horario_saida_sabado || '12:00'}`;
@@ -1299,11 +1566,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 row.getCell(3).value = horarioSab;
                 row.getCell(4).value = formatarHoraMinSeg(totais.totalAtraso);
                 row.getCell(5).value = formatarHoraMinSeg(totais.totalExtra);
-                row.getCell(6).value = formatarHoraMinSeg(totais.totalFalta);
-                row.getCell(7).value = formatarHoraMinSeg(totais.totalTrabalhado);
-                row.getCell(6).font = { color: { argb: 'FFD97706' }, bold: totais.totalFalta > 0 };
+                row.getCell(6).value = formatarHoraMinSeg(totais.pos_expediente);
+                row.getCell(7).value = formatarHoraMinSeg(totais.noturno);
+                row.getCell(8).value = formatarHoraMinSeg(totais.feriado);
+                row.getCell(9).value = formatarHoraMinSeg(totais.fim_de_semana);
+                row.getCell(10).value = formatarHoraMinSeg(totais.totalFalta);
+                row.getCell(11).value = formatarHoraMinSeg(totais.totalTrabalhado);
+                row.getCell(10).font = { color: { argb: 'FFD97706' }, bold: totais.totalFalta > 0 };
                 if ((linhaR - headerRowNum) % 2 === 0) {
-                    for (let c = 1; c <= 7; c++) row.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+                    for (let c = 1; c <= 11; c++) row.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
                 }
                 linhaR++;
             }
@@ -1313,9 +1584,13 @@ document.addEventListener('DOMContentLoaded', () => {
             totalRow.getCell(1).value = 'TOTAL GERAL';
             totalRow.getCell(4).value = formatarHoraMinSeg(geralAtraso);
             totalRow.getCell(5).value = formatarHoraMinSeg(geralExtra);
-            totalRow.getCell(6).value = formatarHoraMinSeg(geralFalta);
-            totalRow.getCell(7).value = formatarHoraMinSeg(geralTrabalhado);
-            for (let c = 1; c <= 7; c++) {
+            totalRow.getCell(6).value = formatarHoraMinSeg(geralPosExpediente);
+            totalRow.getCell(7).value = formatarHoraMinSeg(geralNoturno);
+            totalRow.getCell(8).value = formatarHoraMinSeg(geralFeriado);
+            totalRow.getCell(9).value = formatarHoraMinSeg(geralFimDeSemana);
+            totalRow.getCell(10).value = formatarHoraMinSeg(geralFalta);
+            totalRow.getCell(11).value = formatarHoraMinSeg(geralTrabalhado);
+            for (let c = 1; c <= 11; c++) {
                 totalRow.getCell(c).font = { bold: true };
                 totalRow.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
                 totalRow.getCell(c).border = { top: { style: 'medium' } };

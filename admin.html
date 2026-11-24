@@ -353,6 +353,81 @@
         </div>
     </div>
 
+    <!-- MODAL HORA EXTRA (LANÇAMENTOS CATEGORIZADOS: PÓS-EXPEDIENTE/NOTURNO/FERIADO/FIM DE SEMANA) -->
+    <div id="modal-hora-extra" class="fixed inset-0 bg-slate-900 bg-opacity-80 hidden items-center justify-center z-50 p-4 fade-in">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden border-t-8 border-blue-600 flex flex-col max-h-[90vh]">
+            <div class="px-6 py-4 flex justify-between items-center border-b border-slate-100 shrink-0">
+                <h3 class="text-slate-800 font-black text-lg uppercase flex items-center gap-2">⚡ Hora Extra</h3>
+                <button onclick="document.getElementById('modal-hora-extra').classList.replace('flex','hidden')" class="text-slate-400 text-2xl font-bold">&times;</button>
+            </div>
+            <div class="p-6 space-y-4 overflow-y-auto">
+                <input type="hidden" id="he-func-id">
+                <p id="he-subtitulo" class="text-xs font-bold text-blue-950 bg-blue-50 p-3 rounded-lg border border-blue-200 text-center"></p>
+
+                <div id="he-lista" class="space-y-2"></div>
+
+                <form id="form-hora-extra" class="space-y-4 pt-3 border-t">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Data</label>
+                            <input type="date" id="he-data" class="w-full px-4 py-2 border rounded font-bold text-slate-800 focus:border-blue-500 focus:outline-none" required>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Categoria</label>
+                            <select id="he-categoria" class="w-full px-4 py-2 border rounded font-bold text-slate-800 focus:border-blue-500 focus:outline-none">
+                                <option value="pos_expediente">Pós-expediente</option>
+                                <option value="noturno">Noturno</option>
+                                <option value="feriado">Feriado</option>
+                                <option value="fim_de_semana">Fim de Semana</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Início</label>
+                            <input type="time" id="he-hora-inicio" class="w-full px-4 py-2 border rounded font-mono font-bold text-emerald-700 focus:border-blue-500 focus:outline-none" required>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Fim</label>
+                            <input type="time" id="he-hora-fim" class="w-full px-4 py-2 border rounded font-mono font-bold text-orange-700 focus:border-blue-500 focus:outline-none" required>
+                        </div>
+                    </div>
+                    <label class="flex items-center gap-2.5 text-xs font-bold text-slate-600 cursor-pointer">
+                        <input type="checkbox" id="he-atravessa-meia-noite" class="w-4 h-4 rounded border-slate-300 text-blue-600 cursor-pointer">
+                        <span>Terminou no dia seguinte (turno atravessa a meia-noite)</span>
+                    </label>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Observação (opcional)</label>
+                        <input type="text" id="he-observacao" class="w-full px-4 py-2 border rounded text-slate-800 focus:border-blue-500 focus:outline-none" placeholder="Ex: cobriu turno de outro funcionário">
+                    </div>
+                    <div id="he-erro" class="text-red-600 text-sm hidden font-bold bg-red-50 p-2 rounded text-center"></div>
+                    <div class="flex justify-between items-center pt-1">
+                        <button type="button" onclick="window.abrirModalFeriados()" class="text-xs font-bold text-slate-500 hover:text-slate-700 underline">🗓️ Gerenciar feriados</button>
+                        <button type="submit" class="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-md text-sm uppercase">+ Adicionar Período</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL FERIADOS (CADASTRO SIMPLES PARA SUGESTÃO AUTOMÁTICA DE CATEGORIA) -->
+    <div id="modal-feriados" class="fixed inset-0 bg-slate-900 bg-opacity-90 hidden items-center justify-center z-[60] p-4 fade-in">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden border-t-8 border-slate-700 flex flex-col max-h-[85vh]">
+            <div class="px-6 py-4 flex justify-between items-center border-b border-slate-100 shrink-0">
+                <h3 class="text-slate-800 font-black text-lg uppercase flex items-center gap-2">🗓️ Feriados</h3>
+                <button onclick="document.getElementById('modal-feriados').classList.replace('flex','hidden')" class="text-slate-400 text-2xl font-bold">&times;</button>
+            </div>
+            <div class="p-6 space-y-4 overflow-y-auto">
+                <ul id="fer-lista-feriados" class="space-y-1.5 text-sm"></ul>
+                <form id="form-add-feriado" class="flex gap-2 pt-3 border-t">
+                    <input type="date" id="fer-nova-data" class="flex-1 px-3 py-2 border rounded text-sm" required>
+                    <input type="text" id="fer-novo-nome" placeholder="Nome (opcional)" class="flex-1 px-3 py-2 border rounded text-sm">
+                    <button type="submit" class="px-4 py-2 bg-slate-800 text-white font-bold rounded text-sm">+</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <!-- MODAL VER RELATÓRIO NA TELA -->
     <div id="modal-ver-relatorio" class="fixed inset-0 bg-slate-900 bg-opacity-80 hidden items-center justify-center z-50 p-4 fade-in">
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -375,6 +450,24 @@
                     <div class="absolute right-0 top-0 text-5xl opacity-10 mt-2 mr-2">⏳</div>
                     <p class="text-xs font-bold text-orange-800 uppercase tracking-wide">Horas Faltantes</p>
                     <p class="text-orange-900 font-medium text-sm mt-1" id="relatorio-texto-faltante"></p>
+                </div>
+            </div>
+            <div id="relatorio-extras-categoria-box" class="px-6 py-4 bg-slate-50 border-b border-slate-200 hidden gap-3 shrink-0 flex-wrap">
+                <div class="flex-1 min-w-[140px] bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
+                    <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">🌆 Pós-expediente</p>
+                    <p class="text-slate-800 font-bold text-sm mt-1" id="relatorio-texto-pos-expediente">0m</p>
+                </div>
+                <div class="flex-1 min-w-[140px] bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
+                    <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">🌙 Noturno</p>
+                    <p class="text-slate-800 font-bold text-sm mt-1" id="relatorio-texto-noturno">0m</p>
+                </div>
+                <div class="flex-1 min-w-[140px] bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
+                    <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">🏳️ Feriado</p>
+                    <p class="text-slate-800 font-bold text-sm mt-1" id="relatorio-texto-feriado">0m</p>
+                </div>
+                <div class="flex-1 min-w-[140px] bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
+                    <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">📅 Fim de Semana</p>
+                    <p class="text-slate-800 font-bold text-sm mt-1" id="relatorio-texto-fim-semana">0m</p>
                 </div>
             </div>
             <div class="p-0 overflow-y-auto flex-1"><table class="w-full text-left border-collapse">
